@@ -23,7 +23,7 @@
 ## ビルド
 
 ```sh
-git clone --recurse-submodules --shallow-submodules <repository-url> skk-zenz
+git clone --recurse-submodules --shallow-submodules https://github.com/nekomimist/skk-zenz.git
 cd skk-zenz
 make build   # build/zenz-server をビルドする
 make model   # モデル（70 MB）を models/ にダウンロードし、SHA-256 を検証する
