@@ -72,10 +72,11 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 - [x] ERT tests with a fake server, including a DDSKK integration test that
       types keys in `skk-mode`.
 
-## Phase 4: Docs and packaging
-- [ ] `README.md`: build, model download, configuration examples.
-- [ ] `CHANGELOG.md`.
-- [ ] Model download helper script.
+## Phase 4: Docs and packaging (done)
+- [x] `README.md`: build, model download, configuration examples.
+- [x] `CHANGELOG.md`.
+- [x] Model download helper (`make model`, pinned revision and SHA-256).
+- [x] Check Emacs 29: byte-compiles without warnings and passes ERT on 29.4.
 
 ## Phase 5: Tuning
 - [ ] Context length, beam width, `skk-zenz-min-length`, timeout.

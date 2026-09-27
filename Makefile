@@ -8,15 +8,18 @@ EMACS ?= emacs
 DDSKK_DIR ?= $(BUILD_DIR)/deps/ddskk
 DDSKK_REPO ?= https://github.com/skk-dev/ddskk.git
 
-# Model used by opt-in model tests. Tests that need it skip when it is absent.
+# Model used by `make model` and by opt-in model tests (which skip when it is
+# absent). The URL is pinned to a model repository revision.
 ZENZ_MODEL ?= models/zenz-v3.2-small-Q5_K_M.gguf
 export ZENZ_MODEL := $(abspath $(ZENZ_MODEL))
+MODEL_URL ?= https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf/resolve/c67e03e07d215c869f591b274c1631170d3e11fe/ggml-model-Q5_K_M.gguf
+MODEL_SHA256 ?= 29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673
 
 # DDSKK sources lack lexical-binding cookies, which Emacs 30+ warns about.
 EMACS_BATCH = $(EMACS) -Q --batch --eval "(setq warning-suppress-log-types '((files missing-lexbind-cookie)))" \
 	-L . -L $(DDSKK_DIR)
 
-.PHONY: all build test test-cpp test-elisp compile clean
+.PHONY: all build model test test-cpp test-elisp compile clean
 
 all: build
 
@@ -29,6 +32,14 @@ build: $(BUILD_DIR)/CMakeCache.txt
 # A source checkout has no autoloads until `make install`; generate them.
 # loaddefs-gen warns that it cannot load skk-gadget.el; the output is complete
 # enough for the tests.
+model: $(ZENZ_MODEL)
+
+$(ZENZ_MODEL):
+	mkdir -p $(dir $@)
+	curl -fL --retry 3 -o $@.tmp $(MODEL_URL)
+	echo "$(MODEL_SHA256)  $@.tmp" | sha256sum -c -
+	mv $@.tmp $@
+
 $(DDSKK_DIR):
 	git clone --depth 1 $(DDSKK_REPO) $@
 	cd $@ && $(EMACS) -Q --batch -L . \
