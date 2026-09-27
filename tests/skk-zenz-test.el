@@ -67,26 +67,26 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
 (defun skk-zenz-test--search (key &optional trigger text)
   "Run `skk-zenz-search' for KEY with TRIGGER in a buffer holding TEXT."
   (skk-zenz-test--with-henkan (or text (concat "▼" key)) key
-                              (skk-zenz-search trigger)))
+    (skk-zenz-search trigger)))
 
 ;;; Context
 
 (ert-deftest skk-zenz-test-context ()
   (skk-zenz-test--with-henkan "前の文▼かいとう後ろの文\n次の行" "かいとう"
-                              (let ((skk-zenz-context-length 40))
-                                (should (equal (skk-zenz--left-context) "前の文"))
-                                (should (equal (skk-zenz--right-context) "後ろの文")))
-                              (let ((skk-zenz-context-length 2))
-                                (should (equal (skk-zenz--left-context) "の文"))
-                                (should (equal (skk-zenz--right-context) "後ろ")))
-                              (let ((skk-zenz-context-length 0))
-                                (should (equal (skk-zenz--left-context) ""))
-                                (should (equal (skk-zenz--right-context) "")))))
+    (let ((skk-zenz-context-length 40))
+      (should (equal (skk-zenz--left-context) "前の文"))
+      (should (equal (skk-zenz--right-context) "後ろの文")))
+    (let ((skk-zenz-context-length 2))
+      (should (equal (skk-zenz--left-context) "の文"))
+      (should (equal (skk-zenz--right-context) "後ろ")))
+    (let ((skk-zenz-context-length 0))
+      (should (equal (skk-zenz--left-context) ""))
+      (should (equal (skk-zenz--right-context) "")))))
 
 (ert-deftest skk-zenz-test-context-at-buffer-edges ()
   (skk-zenz-test--with-henkan "▼かな" "かな"
-                              (should (equal (skk-zenz--left-context) ""))
-                              (should (equal (skk-zenz--right-context) ""))))
+    (should (equal (skk-zenz--left-context) ""))
+    (should (equal (skk-zenz--right-context) ""))))
 
 ;;; Eligibility
 
@@ -116,83 +116,83 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
 
 (ert-deftest skk-zenz-test-search-returns-annotated-candidates ()
   (skk-zenz-test--with-server nil
-                              (should (equal (skk-zenz-test--search "かな" :fallback)
-                                             '("かな-1;zenz" "かな-2;zenz" "かな-3;zenz" "かな-4;zenz" "かな-5;zenz")))
-                              (let ((skk-zenz-annotation nil)
-                                    (skk-zenz-fallback-candidates 2))
-                                (should (equal (skk-zenz-test--search "かな" :fallback) '("かな-1" "かな-2"))))))
+    (should (equal (skk-zenz-test--search "かな" :fallback)
+                   '("かな-1;zenz" "かな-2;zenz" "かな-3;zenz" "かな-4;zenz" "かな-5;zenz")))
+    (let ((skk-zenz-annotation nil)
+          (skk-zenz-fallback-candidates 2))
+      (should (equal (skk-zenz-test--search "かな" :fallback) '("かな-1" "かな-2"))))))
 
 (ert-deftest skk-zenz-test-search-long-reading ()
   (skk-zenz-test--with-server nil
-                              (let ((key "きょうはいいてんきですね"))
-                                (should (equal (skk-zenz-test--search key :long)
-                                               (mapcar (lambda (i) (format "%s-%d;zenz" key i)) '(1 2 3))))
-                                (should-not (skk-zenz-test--search key :fallback))
-                                (should-not (skk-zenz-test--search "かな" :long)))))
+    (let ((key "きょうはいいてんきですね"))
+      (should (equal (skk-zenz-test--search key :long)
+                     (mapcar (lambda (i) (format "%s-%d;zenz" key i)) '(1 2 3))))
+      (should-not (skk-zenz-test--search key :fallback))
+      (should-not (skk-zenz-test--search "かな" :long)))))
 
 (ert-deftest skk-zenz-test-search-sends-context ()
   (skk-zenz-test--with-server nil
-                              (should (equal (skk-zenz-test--search "ぶんみゃく" :fallback "左▼ぶんみゃく右\n下")
-                                             '("左|右;zenz")))))
+    (should (equal (skk-zenz-test--search "ぶんみゃく" :fallback "左▼ぶんみゃく右\n下")
+                   '("左|右;zenz")))))
 
 (ert-deftest skk-zenz-test-search-filters-candidates ()
   (skk-zenz-test--with-server nil
-                              (skk-zenz-test--with-henkan "▼ふぃるた" "ふぃるた"
-                                                          (let ((skk-henkan-list '("既存;注釈")))
-                                                            (should (equal (skk-zenz-search :fallback) '("良い;zenz")))))))
+    (skk-zenz-test--with-henkan "▼ふぃるた" "ふぃるた"
+      (let ((skk-henkan-list '("既存;注釈")))
+        (should (equal (skk-zenz-search :fallback) '("良い;zenz")))))))
 
 (ert-deftest skk-zenz-test-search-records-candidates ()
   (skk-zenz-test--with-server nil
-                              (skk-zenz-test--with-henkan "▼かな" "かな"
-                                                          (let ((skk-zenz-fallback-candidates 2))
-                                                            (skk-zenz-search :fallback)
-                                                            (should (equal skk-zenz--candidates '("かな" "かな-1" "かな-2")))))))
+    (skk-zenz-test--with-henkan "▼かな" "かな"
+      (let ((skk-zenz-fallback-candidates 2))
+        (skk-zenz-search :fallback)
+        (should (equal skk-zenz--candidates '("かな" "かな-1" "かな-2")))))))
 
 ;;; Failures
 
 (ert-deftest skk-zenz-test-timeout ()
   (skk-zenz-test--with-server nil
-                              (let ((skk-zenz-timeout 0.2)
-                                    (start (float-time)))
-                                (should-not (skk-zenz-test--search "おそい" :fallback))
-                                (should (< (- (float-time) start) 0.9)))
-                              ;; The late reply is discarded and the next request still works.
-                              (should (equal (skk-zenz-test--search "かな" :fallback)
-                                             '("かな-1;zenz" "かな-2;zenz" "かな-3;zenz" "かな-4;zenz" "かな-5;zenz")))))
+    (let ((skk-zenz-timeout 0.2)
+          (start (float-time)))
+      (should-not (skk-zenz-test--search "おそい" :fallback))
+      (should (< (- (float-time) start) 0.9)))
+    ;; The late reply is discarded and the next request still works.
+    (should (equal (skk-zenz-test--search "かな" :fallback)
+                   '("かな-1;zenz" "かな-2;zenz" "かな-3;zenz" "かな-4;zenz" "かな-5;zenz")))))
 
 (ert-deftest skk-zenz-test-error-response ()
   (skk-zenz-test--with-server nil
-                              (should-not (skk-zenz-test--search "えらー" :fallback))
-                              (should (skk-zenz-test--search "かな" :fallback))))
+    (should-not (skk-zenz-test--search "えらー" :fallback))
+    (should (skk-zenz-test--search "かな" :fallback))))
 
 (ert-deftest skk-zenz-test-server-exit-and-retry ()
   (skk-zenz-test--with-server nil
-                              (should-not (skk-zenz-test--search "しぬ" :fallback))
-                              ;; Give the sentinel a chance to run.
-                              (accept-process-output nil 0.2)
-                              (should skk-zenz--last-failure)
-                              ;; Within the retry interval the server is not restarted.
-                              (should-not (skk-zenz-test--search "かな" :fallback))
-                              (should-not skk-zenz--process)
-                              (setq skk-zenz--last-failure nil)
-                              (should (skk-zenz-test--search "かな" :fallback))))
+    (should-not (skk-zenz-test--search "しぬ" :fallback))
+    ;; Give the sentinel a chance to run.
+    (accept-process-output nil 0.2)
+    (should skk-zenz--last-failure)
+    ;; Within the retry interval the server is not restarted.
+    (should-not (skk-zenz-test--search "かな" :fallback))
+    (should-not skk-zenz--process)
+    (setq skk-zenz--last-failure nil)
+    (should (skk-zenz-test--search "かな" :fallback))))
 
 (ert-deftest skk-zenz-test-startup-failure ()
   (skk-zenz-test--with-server '("FAKE_ZENZ_FAIL=1")
-                              (should-not (skk-zenz-test--search "かな" :fallback))
-                              (should skk-zenz--last-failure)))
+    (should-not (skk-zenz-test--search "かな" :fallback))
+    (should skk-zenz--last-failure)))
 
 (ert-deftest skk-zenz-test-missing-program ()
   (skk-zenz-test--with-server nil
-                              (let ((skk-zenz-server-program "/nonexistent/zenz-server"))
-                                (should-not (skk-zenz-test--search "かな" :fallback))
-                                (should skk-zenz--last-failure))))
+    (let ((skk-zenz-server-program "/nonexistent/zenz-server"))
+      (should-not (skk-zenz-test--search "かな" :fallback))
+      (should skk-zenz--last-failure))))
 
 (ert-deftest skk-zenz-test-protocol-mismatch ()
   (skk-zenz-test--with-server '("FAKE_ZENZ_PROTOCOL=999")
-                              (should-not (skk-zenz-test--search "かな" :fallback))
-                              (should skk-zenz--last-failure)
-                              (should-not skk-zenz--ready)))
+    (should-not (skk-zenz-test--search "かな" :fallback))
+    (should skk-zenz--last-failure)
+    (should-not skk-zenz--ready)))
 
 ;;; Learning exclusion
 
@@ -272,31 +272,31 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
       (write-region "" nil file))
     (unwind-protect
         (skk-zenz-test--with-server nil
-                                    (let ((skk-search-prog-list
-                                           (list skk-zenz--long-form
-                                                 '(skk-search-jisyo-file skk-jisyo 0 t)
-                                                 '(skk-search-jisyo-file skk-large-jisyo 10000)
-                                                 skk-zenz--fallback-form))
-                                          (skk-search-excluding-word-pattern-function
-                                           (list #'skk-zenz--exclude-word-p)))
-                                      ;; Dictionary hit: zenz is not consulted.
-                                      (should (equal (skk-zenz-test--type "" "K i s h a SPC")
-                                                     '("汽車" ("汽車"))))
-                                      ;; Past the dictionary candidates, zenz candidates follow.
-                                      (should (equal (car (skk-zenz-test--type "" "K i s h a SPC SPC"))
-                                                     "きしゃ-1"))
-                                      ;; Dictionary miss: context comes from the buffer, without ▼.
-                                      (should (equal (skk-zenz-test--type "左" "B u n m y a k u SPC")
-                                                     '("左左|" ("左|;zenz"))))
-                                      ;; Long reading: zenz first.
-                                      (should (equal (car (cadr (skk-zenz-test--type
-                                                                 "" "K y o u h a i i t e n k i d e s u n e SPC")))
-                                                     "きょうはいいてんきですね-1;zenz"))
-                                      ;; Only the dictionary word was learned.
-                                      (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
-                                                     (buffer-string))))
-                                        (should (string-match-p "きしゃ /汽車/" jisyo))
-                                        (should-not (string-match-p "きしゃ-1\\|左|\\|てんき" jisyo)))))
+          (let ((skk-search-prog-list
+                 (list skk-zenz--long-form
+                       '(skk-search-jisyo-file skk-jisyo 0 t)
+                       '(skk-search-jisyo-file skk-large-jisyo 10000)
+                       skk-zenz--fallback-form))
+                (skk-search-excluding-word-pattern-function
+                 (list #'skk-zenz--exclude-word-p)))
+            ;; Dictionary hit: zenz is not consulted.
+            (should (equal (skk-zenz-test--type "" "K i s h a SPC")
+                           '("汽車" ("汽車"))))
+            ;; Past the dictionary candidates, zenz candidates follow.
+            (should (equal (car (skk-zenz-test--type "" "K i s h a SPC SPC"))
+                           "きしゃ-1"))
+            ;; Dictionary miss: context comes from the buffer, without ▼.
+            (should (equal (skk-zenz-test--type "左" "B u n m y a k u SPC")
+                           '("左左|" ("左|;zenz"))))
+            ;; Long reading: zenz first.
+            (should (equal (car (cadr (skk-zenz-test--type
+                                       "" "K y o u h a i i t e n k i d e s u n e SPC")))
+                           "きょうはいいてんきですね-1;zenz"))
+            ;; Only the dictionary word was learned.
+            (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
+                           (buffer-string))))
+              (should (string-match-p "きしゃ /汽車/" jisyo))
+              (should-not (string-match-p "きしゃ-1\\|左|\\|てんき" jisyo)))))
       (when-let* ((buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)))
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))
@@ -310,13 +310,13 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
         (model (getenv "ZENZ_MODEL")))
     (skip-unless (and (file-executable-p program) model (file-readable-p model)))
     (skk-zenz-test--with-server nil
-                                (let ((skk-zenz-server-program program)
-                                      (skk-zenz-server-args nil)
-                                      (skk-zenz-model-file model))
-                                  (should (equal (car (skk-zenz-test--search "かいとう" :fallback "試験問題の▼かいとう"))
-                                                 "解答;zenz"))
-                                  (should (equal (car (skk-zenz-test--search "かいとう" :fallback
-                                                                             "冷凍食品を電子レンジで▼かいとう"))
-                                                 "解凍;zenz"))))))
+      (let ((skk-zenz-server-program program)
+            (skk-zenz-server-args nil)
+            (skk-zenz-model-file model))
+        (should (equal (car (skk-zenz-test--search "かいとう" :fallback "試験問題の▼かいとう"))
+                       "解答;zenz"))
+        (should (equal (car (skk-zenz-test--search "かいとう" :fallback
+                                                   "冷凍食品を電子レンジで▼かいとう"))
+                       "解凍;zenz"))))))
 
 ;;; skk-zenz-test.el ends here
