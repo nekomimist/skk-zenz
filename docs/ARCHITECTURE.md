@@ -1,7 +1,6 @@
 # Architecture
 
-Status: draft. Sections marked **(to verify)** depend on Phase 0 results in
-`ROADMAP.md`.
+Status: draft. Phase 0 findings are recorded in `ROADMAP.md`.
 
 ## Goals
 - Convert readings that SKK dictionaries handle poorly (long phrases, unknown
@@ -88,9 +87,10 @@ Two entries, both configurable:
   10). zenz candidates come first for long phrases (the approach that worked with
   Sumibi).
 - (b) Fallback: At the tail of `skk-search-prog-list`, a search that fires for any
-  okuri-nasi reading. DDSKK consults later programs only after the earlier
-  candidates are exhausted, so zenz candidates appear after the dictionary
-  candidates and before dictionary registration. **(to verify)**
+  okuri-nasi reading. `skk-search` stops at the first program that returns
+  candidates and keeps the rest in `skk-current-search-prog-list`; later programs
+  run only when the user steps past the last candidate. zenz candidates therefore
+  appear after the dictionary candidates and before dictionary registration.
 
 Only okuri-nasi conversions are handled. For okuri-ari, the search returns nil.
 
@@ -104,16 +104,24 @@ Only okuri-nasi conversions are handled. For okuri-ari, the search returns nil.
 - DDSKK's `skk-search-excluding-word-pattern-function` hook receives the
   confirmed word. If a hook function returns non-nil, the word is not added to
   the personal dictionary. The hook is called from `skk-update-jisyo-p`.
-- skk-zenz records the candidates it returned for the current conversion and
-  excludes a confirmed word only if it came from zenz and not from a dictionary.
+- The hook receives only the word, but `skk-henkan-key` is still set when it
+  runs. skk-zenz records the (reading, candidates) pairs it returned and excludes
+  a confirmed word only if it came from zenz and not from a dictionary.
 - Candidates are annotated (for example `[zenz]`) so the user can see where they
   came from.
 
 ## llama.cpp Dependency
-- zenz models need a tokenizer fix. As of 2026-07, `azooKey/llama.cpp` branch
-  `azookey/b9637-compat` is upstream tag `b9637` plus one commit that:
+- Upstream llama.cpp cannot load zenz models: the GGUF declares
+  `tokenizer.ggml.pre = gpt2-small-japanese-char`, which upstream does not know.
+- The GGUF also declares wrong special token IDs (bos=1, eos=2), while the
+  vocabulary has `[UNK]`=0, `[PAD]`=1, `<s>`=2, `</s>`=3. With the declared IDs,
+  generation would not stop at `</s>`.
+- `azooKey/llama.cpp` branch `azookey/b9637-compat` is upstream tag `b9637` plus
+  one commit that:
   - adds the `gpt2-small-japanese-char` pre-tokenizer type,
   - maps the newline and space byte symbols to `[UNK]`,
-  - fixes special token IDs (unk=0, pad=1, bos=2, eos=3).
-- Plan: pin that branch as a git submodule. Carrying the patch on top of upstream
-  is the fallback if the fork stops tracking upstream. **(to verify)**
+  - overrides the special token IDs (unk=0, pad=1, bos=2, eos=3).
+- Decision: pin that branch as a git submodule. If the fork stops tracking
+  upstream, carry the same patch on top of upstream instead.
+- The vocabulary is byte-level BPE with 6000 tokens. Each U+EExx tag encodes
+  as three byte tokens; this matches how azooKey tokenizes prompts.
