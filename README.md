@@ -108,6 +108,10 @@ that need the model run when `models/zenz-v3.2-small-Q5_K_M.gguf` (or
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and plans in
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## License
+
+MIT License. See [LICENSE](LICENSE).
+
 ## Third-party components
 
 - llama.cpp ([azooKey fork](https://github.com/azooKey/llama.cpp), branch
@@ -115,5 +119,6 @@ that need the model run when `models/zenz-v3.2-small-Q5_K_M.gguf` (or
   llama.cpp cannot load the zenz tokenizer.
 - zenz-v3.2-small model by Miwa-Keita: Apache License 2.0. Not included in
   this repository; `make model` downloads it.
-- The prompt format follows
-  [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter).
+- The prompt format and its preprocessing follow
+  [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter)
+  (MIT License, Copyright (c) 2023 Miwa / Ensan).

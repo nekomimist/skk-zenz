@@ -1,9 +1,12 @@
 ;;; skk-zenz.el --- Neural kana-kanji conversion for DDSKK with zenz -*- lexical-binding: t -*-
 
+;; Copyright (C) 2026 Hiroyuki Ishikura
+
 ;; Author: Hiroyuki Ishikura
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (ddskk "17.1"))
 ;; Keywords: i18n, input method, japanese
+;; SPDX-License-Identifier: MIT
 
 ;;; Commentary:
 
