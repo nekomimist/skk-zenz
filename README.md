@@ -1,45 +1,38 @@
 # skk-zenz
 
-skk-zenz adds neural kana-kanji conversion to [DDSKK](https://github.com/skk-dev/ddskk)
-using the [zenz v3.2](https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf)
-language model. The model runs locally on the CPU through
-[llama.cpp](https://github.com/azooKey/llama.cpp), so no text leaves your
-machine and there is no API cost.
+[DDSKK](https://github.com/skk-dev/ddskk) に、言語モデル
+[zenz v3.2](https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf) によるかな漢字変換を追加します。
+モデルは [llama.cpp](https://github.com/azooKey/llama.cpp) を使って手元の CPU で動くため、
+入力した文章は外部に送られず、API の利用料もかかりません。
 
-- Long readings (10 characters or more by default) are converted by zenz
-  before any dictionary.
-- Other readings get zenz candidates after the dictionary candidates run out,
-  before dictionary registration.
-- zenz uses the text around the conversion target as context, so the same
-  reading converts differently depending on the sentence
-  (試験問題の**解答** vs. 電子レンジで**解凍**).
-- Words confirmed from zenz candidates for long readings are not added to
-  your personal dictionary. Words confirmed from the other zenz candidates are
-  learned like dictionary words.
+- 長い読み（既定では 10 文字以上）は、辞書より先に zenz で変換します。
+- それ以外の読みでは、辞書の候補を出し尽くしたあとに zenz の候補を出します。辞書登録モードに入るのは、その候補も尽きたときです。
+- zenz は変換対象の前後の文章を文脈として使います。同じ読みでも文脈によって変換結果が変わります（試験問題の**解答**、電子レンジで**解凍**）。
+- 長い読みで zenz の候補を確定しても、個人辞書には登録しません。それ以外で zenz の候補を確定したときは、辞書の候補と同じように個人辞書に学習します。
 
-Status: experimental. Tested on Linux x86_64 with Emacs 29.4 and 31.1.
+開発中のソフトウェアです。動作確認は Linux x86_64 上の Emacs 29.4 と 31.1 で行っています。
 
-## Requirements
+## 必要なもの
 
-- Linux x86_64 (ARM64 is planned)
-- CMake 3.16 or later and a C++17 compiler
-- Emacs 29.1 or later with DDSKK
-- git and curl
-- About 100 MB of memory for the server
+- Linux x86_64（ARM64 は対応予定）
+- CMake 3.16 以降と C++17 コンパイラ
+- Emacs 29.1 以降と DDSKK
+- git と curl
+- サーバ用のメモリ約 100 MB
 
-## Build
+## ビルド
 
 ```sh
 git clone --recurse-submodules --shallow-submodules <repository-url> skk-zenz
 cd skk-zenz
-make build   # builds build/zenz-server
-make model   # downloads the model (70 MB) to models/ and checks its SHA-256
+make build   # build/zenz-server をビルドする
+make model   # モデル（70 MB）を models/ にダウンロードし、SHA-256 を検証する
 ```
 
-If you cloned without `--recurse-submodules`, run
-`git submodule update --init --depth 1` first.
+`--recurse-submodules` を付けずに clone した場合は、先に
+`git submodule update --init --depth 1` を実行してください。
 
-Check the server from the command line:
+コマンドラインでサーバの動作を確認できます。
 
 ```sh
 $ build/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
@@ -49,7 +42,7 @@ $ build/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
 解凍
 ```
 
-## Emacs setup
+## Emacs の設定
 
 ```elisp
 (add-to-list 'load-path "/path/to/skk-zenz")
@@ -57,68 +50,57 @@ $ build/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
 (skk-zenz-mode 1)
 ```
 
-Enable `skk-zenz-mode` after your `skk-search-prog-list` is set up: the mode
-adds `(skk-zenz-search :long)` to the head of the list and
-`(skk-zenz-search :fallback)` to the tail. Disabling the mode removes both and
-stops the server.
+`skk-zenz-mode` は、`skk-search-prog-list` を設定したあとで有効にしてください。
+有効にすると、リストの先頭に `(skk-zenz-search :long)` を、末尾に
+`(skk-zenz-search :fallback)` を追加します。無効にすると、この 2 つを取り除いてサーバを止めます。
 
-When skk-zenz is loaded from this directory, it finds `build/zenz-server` and
-`models/zenz-v3.2-small-Q5_K_M.gguf` automatically. Otherwise set
-`skk-zenz-server-program` and `skk-zenz-model-file` (or the `ZENZ_MODEL`
-environment variable).
+skk-zenz をこのディレクトリから読み込むと、サーバとモデルを自動で見つけます。
+対象は `build/zenz-server` と `models/zenz-v3.2-small-Q5_K_M.gguf` です。別の場所に置いた場合は、
+`skk-zenz-server-program` と `skk-zenz-model-file`（または環境変数 `ZENZ_MODEL`）を設定してください。
 
-### Options
+### 設定項目
 
-| Variable | Default | Meaning |
+| 変数 | 既定値 | 意味 |
 |---|---|---|
-| `skk-zenz-min-length` | `10` | Readings at least this long go to zenz first. `nil` means zenz is only a fallback. |
-| `skk-zenz-long-candidates` | `3` | Candidates requested for long readings. |
-| `skk-zenz-fallback-candidates` | `5` | Candidates requested after the dictionaries. |
-| `skk-zenz-context-length` | `40` | Characters of context sent on each side. `0` disables context. |
-| `skk-zenz-annotation` | `"zenz"` | Annotation on zenz candidates. `nil` for none. |
-| `skk-zenz-learn-fallback` | `t` | Learn words confirmed from candidates shown after the dictionaries. |
-| `skk-zenz-timeout` | `1.0` | Seconds to wait for a conversion. |
-| `skk-zenz-server-args` | `nil` | Extra server arguments, for example `("--threads" "8")`. |
-| `skk-zenz-reading-regexp` | hiragana, ー, 、。・！？ | Readings that are sent to zenz. |
+| `skk-zenz-min-length` | `10` | この文字数以上の読みは、辞書より先に zenz で変換する。`nil` にすると、zenz は辞書の候補のあとにだけ使う。 |
+| `skk-zenz-long-candidates` | `3` | 長い読みで zenz に求める候補の数。 |
+| `skk-zenz-fallback-candidates` | `5` | 辞書の候補のあとに zenz に求める候補の数。 |
+| `skk-zenz-context-length` | `40` | 文脈として前後それぞれに送る最大文字数。`0` にすると文脈を送らない。 |
+| `skk-zenz-annotation` | `"zenz"` | zenz の候補に付ける注釈。`nil` にすると注釈を付けない。 |
+| `skk-zenz-learn-fallback` | `t` | 辞書の候補のあとに出した zenz の候補を確定したとき、個人辞書に学習するかどうか。 |
+| `skk-zenz-timeout` | `1.0` | 変換結果を待つ秒数。 |
+| `skk-zenz-server-args` | `nil` | サーバに渡す追加の引数。例: `("--threads" "8")` |
+| `skk-zenz-reading-regexp` | ひらがな・ー・、。・！？ | zenz に送る読みを表す正規表現。 |
 
-Conversion takes about 20 ms for short readings and 60–130 ms for a 20-character
-reading on a recent x86_64 CPU with 4 threads; more candidates take longer.
+最近の x86_64 CPU で 4 スレッドを使う場合、変換にかかる時間は短い読みで約 20 ms、20 文字程度の読みで 60〜130 ms です。
+候補の数を増やすほど時間がかかります。
 
-### Troubleshooting
+### うまく動かないとき
 
-- Server problems are shown in the echo area. After a failure, skk-zenz waits
-  `skk-zenz-retry-interval` (30 s) before starting the server again;
-  `M-x skk-zenz-restart` retries immediately.
-- The server's stderr is in the buffer ` *zenz-server stderr*`.
-- Set `skk-zenz-debug` to `t` to log the protocol traffic to `*Messages*`.
+- サーバの問題はエコーエリアに表示されます。失敗したあとは、`skk-zenz-retry-interval`（30 秒）が過ぎるまでサーバを再起動しません。すぐに再起動するには `M-x skk-zenz-restart` を実行してください。
+- サーバの標準エラー出力は、バッファ ` *zenz-server stderr*` で確認できます。
+- `skk-zenz-debug` を `t` にすると、サーバとのやりとりを `*Messages*` に記録します。
 
-## Development
+## 開発
 
 ```sh
 make test
 ```
 
-`make test` builds the server, runs the C++ tests, byte-compiles
-`skk-zenz.el`, and runs the ERT tests. On the first run it clones DDSKK into
-`build/deps/ddskk`; set `DDSKK_DIR` to use an installed copy instead. Tests
-that need the model run when `models/zenz-v3.2-small-Q5_K_M.gguf` (or
-`ZENZ_MODEL`) exists and are skipped otherwise.
+`make test` は、サーバのビルド、C++ のテスト、`skk-zenz.el` のバイトコンパイル、ERT のテストを順に実行します。
+初回は DDSKK を `build/deps/ddskk` に clone します。インストール済みの DDSKK を使うには `DDSKK_DIR` を指定してください。
+モデルが必要なテストは、モデルファイルがあるときだけ実行し、ないときはスキップします。
+モデルファイルは `models/zenz-v3.2-small-Q5_K_M.gguf`、または `ZENZ_MODEL` が指すファイルです。
 
-`scripts/bench_server.py` measures server latency. Design notes are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and plans in
-[docs/ROADMAP.md](docs/ROADMAP.md).
+サーバの応答時間は `scripts/bench_server.py` で計測できます。設計は
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、今後の計画は [docs/ROADMAP.md](docs/ROADMAP.md) にあります（どちらも英語）。
 
-## License
+## ライセンス
 
-MIT License. See [LICENSE](LICENSE).
+MIT License です。[LICENSE](LICENSE) を参照してください。
 
-## Third-party components
+## 利用しているもの
 
-- llama.cpp ([azooKey fork](https://github.com/azooKey/llama.cpp), branch
-  `azookey/b9637-compat`): MIT License. The fork is required because upstream
-  llama.cpp cannot load the zenz tokenizer.
-- zenz-v3.2-small model by Miwa-Keita: Apache License 2.0. Not included in
-  this repository; `make model` downloads it.
-- The prompt format and its preprocessing follow
-  [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter)
-  (MIT License, Copyright (c) 2023 Miwa / Ensan).
+- llama.cpp（[azooKey のフォーク](https://github.com/azooKey/llama.cpp)、ブランチ `azookey/b9637-compat`）: MIT License。本家の llama.cpp は zenz のトークナイザを読み込めないため、フォークが必要です。
+- Miwa-Keita 氏の zenz-v3.2-small モデル: Apache License 2.0。このリポジトリには含めていません。`make model` でダウンロードします。
+- プロンプトの形式と前処理は [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter) に従っています。AzooKeyKanaKanjiConverter は MIT License です（Copyright (c) 2023 Miwa / Ensan）。

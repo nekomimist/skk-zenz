@@ -16,6 +16,14 @@ through llama.cpp. It has two parts:
 - Keep design notes and task lists in `docs/`, not in this file. This file holds
   only rules for working in the repository.
 
+## Documentation Language
+- Documents read mainly by LLM agents are in English: `AGENTS.md` and `docs/`.
+- Documents read mainly by users are in Japanese: `README.md` and
+  `CHANGELOG.md`.
+- Code, comments, docstrings, and commit messages stay in English.
+- After writing or changing Japanese documents, check them with the `meiseki`
+  skill when it is available.
+
 ## Agent Workflow
 - Architecture-first: Before changing the protocol, prompt format, decoding,
   trigger policy, or learning exclusion, read `docs/ARCHITECTURE.md`.

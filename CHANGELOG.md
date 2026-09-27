@@ -1,14 +1,10 @@
-# Changelog
+# 変更履歴
 
-## Unreleased
+## 未リリース
 
-### Added
-- `zenz-server`: loads zenz v3.2 through llama.cpp and converts readings with
-  left and right context. It serves a JSON Lines protocol (version 1) on
-  stdin/stdout and also has one-shot `--convert` and `--prompt` modes.
-- n-best candidates by beam search with a shared KV cache.
-- `skk-zenz.el`: `skk-zenz-mode` adds zenz to `skk-search-prog-list`, first for
-  long readings and after the dictionaries for the rest. Words confirmed for
-  long readings are not learned; the rest are learned without the zenz
-  annotation (`skk-zenz-learn-fallback`).
-- `make model` downloads the model and checks its SHA-256.
+### 追加
+
+- `zenz-server`: llama.cpp で zenz v3.2 を読み込み、前後の文脈を使って読みを変換する。標準入出力で JSON Lines のプロトコル（バージョン 1）を提供する。単発で変換する `--convert` と、プロンプトを表示する `--prompt` も使える。
+- ビーム探索で複数の候補を出す。プロンプトの計算結果（KV キャッシュ）はビーム間で共有する。
+- `skk-zenz.el`: `skk-zenz-mode` で zenz を `skk-search-prog-list` に追加する。長い読みは辞書より先に、それ以外は辞書の候補のあとに zenz を使う。長い読みで確定した語は個人辞書に登録しない。それ以外の語は zenz の注釈を外して学習する（`skk-zenz-learn-fallback`）。
+- `make model` でモデルをダウンロードし、SHA-256 を検証する。
