@@ -13,8 +13,9 @@ machine and there is no API cost.
 - zenz uses the text around the conversion target as context, so the same
   reading converts differently depending on the sentence
   (試験問題の**解答** vs. 電子レンジで**解凍**).
-- Words confirmed from zenz candidates are not added to your personal
-  dictionary.
+- Words confirmed from zenz candidates for long readings are not added to
+  your personal dictionary. Words confirmed from the other zenz candidates are
+  learned like dictionary words.
 
 Status: experimental. Tested on Linux x86_64 with Emacs 29.4 and 31.1.
 
@@ -75,6 +76,7 @@ environment variable).
 | `skk-zenz-fallback-candidates` | `5` | Candidates requested after the dictionaries. |
 | `skk-zenz-context-length` | `40` | Characters of context sent on each side. `0` disables context. |
 | `skk-zenz-annotation` | `"zenz"` | Annotation on zenz candidates. `nil` for none. |
+| `skk-zenz-learn-fallback` | `t` | Learn words confirmed from candidates shown after the dictionaries. |
 | `skk-zenz-timeout` | `1.0` | Seconds to wait for a conversion. |
 | `skk-zenz-server-args` | `nil` | Extra server arguments, for example `("--threads" "8")`. |
 | `skk-zenz-reading-regexp` | hiragana, ー, 、。・！？ | Readings that are sent to zenz. |

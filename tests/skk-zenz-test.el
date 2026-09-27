@@ -146,7 +146,7 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
     (skk-zenz-test--with-henkan "▼かな" "かな"
       (let ((skk-zenz-fallback-candidates 2))
         (skk-zenz-search :fallback)
-        (should (equal skk-zenz--candidates '("かな" "かな-1" "かな-2")))))))
+        (should (equal skk-zenz--candidates '("かな" :fallback ("かな-1" "かな-2"))))))))
 
 ;;; Failures
 
@@ -196,13 +196,17 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
 
 ;;; Learning exclusion
 
-(ert-deftest skk-zenz-test-exclude-word ()
+(ert-deftest skk-zenz-test-learning ()
   (let ((skk-zenz-annotation "zenz")
+        (skk-zenz-learn-fallback t)
         (skk-henkan-key "かな")
-        (skk-zenz--candidates '("かな" "仮名" "カナ"))
+        (skk-zenz--candidates '("かな" :long ("仮名" "カナ")))
         (skk-search-excluding-word-pattern-function nil))
     (add-hook 'skk-search-excluding-word-pattern-function #'skk-zenz--exclude-word-p)
+    ;; Words from long-reading candidates are never learned.
     (should-not (skk-update-jisyo-p "仮名;zenz"))
+    (let ((skk-zenz-learn-fallback nil))
+      (should-not (skk-update-jisyo-p "仮名;zenz")))
     ;; Same word from a dictionary (no zenz annotation) is learned.
     (should (skk-update-jisyo-p "仮名"))
     (should (skk-update-jisyo-p "仮名;辞書の注釈"))
@@ -211,7 +215,23 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
       (should (skk-update-jisyo-p "仮名;zenz")))
     (let ((skk-zenz-annotation nil))
       (should-not (skk-update-jisyo-p "仮名"))
-      (should (skk-update-jisyo-p "金")))))
+      (should (skk-update-jisyo-p "金")))
+    ;; Words from fallback candidates are learned unless disabled.
+    (let ((skk-zenz--candidates '("かな" :fallback ("仮名"))))
+      (should (skk-update-jisyo-p "仮名;zenz"))
+      (let ((skk-zenz-learn-fallback nil))
+        (should-not (skk-update-jisyo-p "仮名;zenz"))))))
+
+(ert-deftest skk-zenz-test-strip-annotation ()
+  (let ((skk-zenz-annotation "zenz")
+        (skk-henkan-key "かな")
+        (skk-zenz--candidates '("かな" :fallback ("仮名"))))
+    (should (equal (skk-zenz--strip-annotation '("仮名;zenz" nil)) '("仮名" nil)))
+    ;; Words that did not come from zenz keep their annotation.
+    (should (equal (skk-zenz--strip-annotation '("仮名;辞書" nil)) '("仮名;辞書" nil)))
+    (should (equal (skk-zenz--strip-annotation '("金;zenz")) '("金;zenz")))
+    (let ((skk-zenz-annotation nil))
+      (should (equal (skk-zenz--strip-annotation '("仮名")) '("仮名"))))))
 
 ;;; Minor mode
 
@@ -226,13 +246,15 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
           (should (equal (car (last skk-search-prog-list)) skk-zenz--fallback-form))
           (should (memq #'skk-zenz--exclude-word-p
                         skk-search-excluding-word-pattern-function))
+          (should (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))
           ;; Enabling twice does not add duplicates.
           (skk-zenz-mode 1)
           (should (= (length skk-search-prog-list) 3)))
       (skk-zenz-mode -1))
     (should (equal skk-search-prog-list '((skk-search-jisyo-file skk-jisyo 0 t))))
     (should-not (memq #'skk-zenz--exclude-word-p
-                      skk-search-excluding-word-pattern-function))))
+                      skk-search-excluding-word-pattern-function))
+    (should-not (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))))
 
 ;;; SKK integration
 
@@ -278,7 +300,9 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                        '(skk-search-jisyo-file skk-large-jisyo 10000)
                        skk-zenz--fallback-form))
                 (skk-search-excluding-word-pattern-function
-                 (list #'skk-zenz--exclude-word-p)))
+                 (list #'skk-zenz--exclude-word-p))
+                (skk-zenz-learn-fallback t))
+            (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
             ;; Dictionary hit: zenz is not consulted.
             (should (equal (skk-zenz-test--type "" "K i s h a SPC")
                            '("汽車" ("汽車"))))
@@ -292,11 +316,14 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
             (should (equal (car (cadr (skk-zenz-test--type
                                        "" "K y o u h a i i t e n k i d e s u n e SPC")))
                            "きょうはいいてんきですね-1;zenz"))
-            ;; Only the dictionary word was learned.
+            ;; Dictionary and fallback words were learned, without the zenz
+            ;; annotation; the long-reading word was not.
             (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
                            (buffer-string))))
-              (should (string-match-p "きしゃ /汽車/" jisyo))
-              (should-not (string-match-p "きしゃ-1\\|左|\\|てんき" jisyo)))))
+              (should (string-match-p "^きしゃ /きしゃ-1/汽車/$" jisyo))
+              (should (string-match-p "^ぶんみゃく /左|/$" jisyo))
+              (should-not (string-match-p "zenz\\|てんき" jisyo)))))
+      (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
       (when-let* ((buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)))
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))

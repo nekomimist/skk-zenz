@@ -148,17 +148,27 @@ misinterpret: `;` starts an annotation, a string that looks like a Lisp form
 Kept candidates get the annotation `;zenz` (`skk-zenz-annotation`, nil for
 none).
 
-### Learning exclusion
-- DDSKK's `skk-search-excluding-word-pattern-function` hook receives the
-  confirmed word (with its annotation). If a hook function returns non-nil, the
-  word is not added to the personal dictionary. The hook is called from
+### Learning
+- Words confirmed from candidates for long readings (trigger a) are not
+  learned. These are usually whole phrases that would clutter the personal
+  dictionary, and zenz converts them again next time with fresh context.
+- Words confirmed from fallback candidates (trigger b) are learned like
+  dictionary words, so the next conversion of the reading finds them in the
+  personal dictionary. `skk-zenz-learn-fallback` set to nil excludes them too.
+- skk-zenz records the reading, the trigger, and the words it returned for the
+  last zenz search (buffer-local). A confirmed word counts as a zenz word if
+  the reading matches, the word is one of those, and its annotation is
+  `skk-zenz-annotation`. With annotations on, the same word from a dictionary
+  has a different (or no) annotation and is treated as a dictionary word. With
+  annotations off, any matching word counts as a zenz word.
+- Exclusion uses DDSKK's `skk-search-excluding-word-pattern-function` hook. It
+  receives the confirmed word with its annotation; returning non-nil keeps the
+  word out of the personal dictionary. DDSKK calls it from
   `skk-update-jisyo-p`, while `skk-henkan-key` is still set.
-- skk-zenz records the reading and the words it returned for the last zenz
-  search (buffer-local). A confirmed word is excluded if the reading matches,
-  the word is one of those, and its annotation is `skk-zenz-annotation`. With
-  annotations on, the same word from a dictionary has a different (or no)
-  annotation and is learned normally. With annotations off, any matching word
-  is excluded.
+- DDSKK writes the confirmed word to the personal dictionary with its
+  annotation. A `:filter-args` advice on `skk-update-jisyo` removes the zenz
+  annotation from zenz words first, so learned words do not show it when they
+  later come from the dictionary. `skk-zenz-mode` adds and removes the advice.
 
 ### Process management and failures
 - The server starts on the first zenz search and must send a compatible hello

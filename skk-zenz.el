@@ -23,8 +23,10 @@
 ;; - At the tail, `(skk-zenz-search :fallback)' offers candidates after
 ;;   the dictionary candidates run out, before dictionary registration.
 ;;
-;; Words confirmed from zenz candidates are not added to the personal
-;; dictionary.  See docs/ARCHITECTURE.md for the design.
+;; Words confirmed from zenz candidates for long readings are not added
+;; to the personal dictionary; words from fallback candidates are learned
+;; as usual (see `skk-zenz-learn-fallback').  See docs/ARCHITECTURE.md
+;; for the design.
 
 ;;; Code:
 
@@ -93,6 +95,15 @@ Okuri-ari readings never match because they end with an ASCII letter."
   "Annotation attached to zenz candidates, or nil for none."
   :type '(choice (const :tag "None" nil) string))
 
+(defcustom skk-zenz-learn-fallback t
+  "If non-nil, words confirmed from fallback candidates are learned.
+Fallback candidates are those offered after the dictionary candidates.
+Such words are added to the personal dictionary without the zenz
+annotation, so the next conversion of the reading finds them there.
+Words confirmed from candidates for long readings (see
+`skk-zenz-min-length') are never learned."
+  :type 'boolean)
+
 (defcustom skk-zenz-timeout 1.0
   "Seconds to wait for a conversion before giving up."
   :type 'number)
@@ -125,8 +136,8 @@ Okuri-ari readings never match because they end with an ASCII letter."
   "Time of the last server failure, as returned by `float-time'.")
 
 (defvar-local skk-zenz--candidates nil
-  "Candidates zenz returned for the last reading, as (READING . WORDS).
-Used to keep these words out of the personal dictionary.")
+  "Candidates zenz returned for the last reading, as (READING TRIGGER WORDS).
+Used to decide whether a confirmed word is learned.")
 
 (defconst skk-zenz--long-form '(skk-zenz-search :long)
   "Entry `skk-zenz-mode' adds to the head of `skk-search-prog-list'.")
@@ -399,23 +410,40 @@ the entry at the tail."
                      key
                      (skk-zenz--request key (skk-zenz--left-context)
                                         (skk-zenz--right-context) n))))
-        (setq skk-zenz--candidates (cons key words))
+        (setq skk-zenz--candidates (list key trigger words))
         (if skk-zenz-annotation
             (mapcar (lambda (word) (concat word ";" skk-zenz-annotation)) words)
           words)))))
 
-(defun skk-zenz--exclude-word-p (word)
-  "Return non-nil if confirmed WORD came from zenz.
-Used in `skk-search-excluding-word-pattern-function' so that zenz
-candidates are not added to the personal dictionary."
+(defun skk-zenz--word-trigger (word)
+  "Return the trigger (:long or :fallback) if confirmed WORD came from zenz.
+WORD may carry an annotation.  Return nil for words from elsewhere."
   (let* ((pair (skk-treat-strip-note-from-word word))
          (candidate (car pair))
          (note (cdr pair)))
-    (and (equal (car skk-zenz--candidates) skk-henkan-key)
-         (member candidate (cdr skk-zenz--candidates))
-         ;; With annotations on, an unannotated word came from a dictionary.
-         (or (null skk-zenz-annotation) (equal note skk-zenz-annotation))
-         t)))
+    (pcase-let ((`(,key ,trigger ,words) skk-zenz--candidates))
+      (and (equal key skk-henkan-key)
+           (member candidate words)
+           ;; With annotations on, an unannotated word came from a dictionary.
+           (or (null skk-zenz-annotation) (equal note skk-zenz-annotation))
+           trigger))))
+
+(defun skk-zenz--exclude-word-p (word)
+  "Return non-nil if confirmed WORD should not be learned.
+Used in `skk-search-excluding-word-pattern-function'."
+  (pcase (skk-zenz--word-trigger word)
+    (:long t)
+    (:fallback (not skk-zenz-learn-fallback))))
+
+(defun skk-zenz--strip-annotation (args)
+  "Remove the zenz annotation from the word in ARGS of `skk-update-jisyo'.
+DDSKK stores the confirmed word with its annotation, which would make
+learned words show the zenz annotation when they later come from the
+personal dictionary."
+  (let ((word (car args)))
+    (if (and skk-zenz-annotation (stringp word) (skk-zenz--word-trigger word))
+        (cons (car (skk-treat-strip-note-from-word word)) (cdr args))
+      args)))
 
 ;;;###autoload
 (define-minor-mode skk-zenz-mode
@@ -432,13 +460,15 @@ readings get zenz candidates after the dictionary candidates."
           (setq skk-search-prog-list
                 (append skk-search-prog-list (list skk-zenz--fallback-form))))
         (add-hook 'skk-search-excluding-word-pattern-function
-                  #'skk-zenz--exclude-word-p))
+                  #'skk-zenz--exclude-word-p)
+        (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation))
     (setq skk-search-prog-list
           (seq-remove (lambda (form)
                         (member form (list skk-zenz--long-form skk-zenz--fallback-form)))
                       skk-search-prog-list))
     (remove-hook 'skk-search-excluding-word-pattern-function
                  #'skk-zenz--exclude-word-p)
+    (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
     (skk-zenz-stop)))
 
 (provide 'skk-zenz)
