@@ -50,7 +50,10 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
 - Omit the U+EE02 / U+EE07 sections when the corresponding context is empty.
 - Optional conditions: U+EE03 profile, U+EE04 topic, U+EE05 style, U+EE06
   preference (each up to 25 characters). Not used initially.
-- The reading must be katakana; the client or server converts hiragana.
+- The reading must be katakana; zenz-server converts hiragana.
+- Like azooKey, zenz-server replaces ASCII spaces with U+3000 and removes
+  newlines, because the tokenizer maps both to `[UNK]`. It does this before
+  truncating the context so newlines do not use up the character budget.
 
 ## Decoding
 - azooKey's `ZenzPureGreedyDecoder` produces a single greedy result.

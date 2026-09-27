@@ -29,12 +29,12 @@ Findings (2026-09-27, WSL2 on x86_64 with 32 hardware threads, `llama-simple` de
   `skk-current-search-prog-list` and resumes them when candidates run out.
 
 ## Phase 1: One-shot CLI
-- [ ] CMake project with llama.cpp as a submodule, static link.
-- [ ] Prompt builder, hiragana-to-katakana conversion.
+- [x] CMake project with llama.cpp as a submodule, static link.
+- [x] Prompt builder, hiragana-to-katakana conversion.
 - [ ] Greedy decoding.
 - [ ] n-best beam search with shared KV cache.
 - [ ] C++ tests (prompt builder, katakana conversion); opt-in model tests.
-- [ ] Top-level `Makefile` with `build` and `test` targets.
+- [x] Top-level `Makefile` with `build` and `test` targets.
 
 ## Phase 2: Resident server
 - [ ] JSON Lines protocol over stdin/stdout with hello/version line.
