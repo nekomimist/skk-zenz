@@ -31,10 +31,25 @@ Findings (2026-09-27, WSL2 on x86_64 with 32 hardware threads, `llama-simple` de
 ## Phase 1: One-shot CLI
 - [x] CMake project with llama.cpp as a submodule, static link.
 - [x] Prompt builder, hiragana-to-katakana conversion.
-- [ ] Greedy decoding.
-- [ ] n-best beam search with shared KV cache.
-- [ ] C++ tests (prompt builder, katakana conversion); opt-in model tests.
+- [x] Greedy decoding.
+- [x] n-best beam search with shared KV cache.
+- [x] C++ tests (prompt builder, katakana conversion); opt-in model tests.
 - [x] Top-level `Makefile` with `build` and `test` targets.
+
+Findings (warm, `zenz-server --bench 20`, same machine as Phase 0):
+
+| Reading | Candidates | 1 thread | 2 threads | 4 threads | 8 threads |
+|---|---|---|---|---|---|
+| 22 kana, 6-char left context | 1 (greedy) | 149 ms | 89 ms | 60 ms | 57 ms |
+| same | 3 | 249 ms | 157 ms | 89 ms | 74 ms |
+| same | 5 | 368 ms | 207 ms | 121 ms | 98 ms |
+| きしゃ | 1 / 5 | | | 14 / 27 ms | |
+
+- The default is 4 threads; more threads help little.
+- Beam search costs roughly linearly in the beam width, so trigger (a) may want
+  fewer candidates than trigger (b). Revisit in Phase 5.
+- Lower beams sometimes produce broken text (機械学習のモデルを組んれんする);
+  consider filtering in Phase 5.
 
 ## Phase 2: Resident server
 - [ ] JSON Lines protocol over stdin/stdout with hello/version line.

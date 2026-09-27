@@ -57,10 +57,19 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
 
 ## Decoding
 - azooKey's `ZenzPureGreedyDecoder` produces a single greedy result.
-- SKK expects several candidates, so zenz-server runs a small beam search
-  (n-best). It evaluates the prompt once and shares the KV cache across beams
-  (for example with `llama_memory_seq_cp`).
-- Duplicates and candidates identical to the reading are removed.
+- SKK expects several candidates, so zenz-server runs a beam search (n-best);
+  beam width 1 is greedy decoding. It decodes the prompt once and shares the KV
+  cache across beams: beams alternate between two banks of sequence IDs, and
+  `llama_memory_seq_cp` tags the parent's cells for the child without copying
+  data. This needs `kv_unified = true` and `n_seq_max = 2 * max beam width`.
+- No BOS token is prepended. The GGUF sets `add_bos_token = false`, so azooKey's
+  `add_bos: true` has no effect either.
+- Search stops when n-best candidates have finished and no live beam can beat
+  the n-th score (scores only decrease). Output is capped at the reading length
+  plus 8 tokens.
+- Candidates are sorted by total log-probability. Duplicate strings (the same
+  text reached through different tokenizations) are removed. The server does
+  not filter kana-only candidates; the client decides.
 
 ## Protocol (draft)
 One JSON object per line in each direction, UTF-8.

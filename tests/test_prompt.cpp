@@ -12,7 +12,7 @@ static void test_to_katakana() {
 }
 
 static void test_normalize_for_model() {
-    CHECK_EQ(zenz::normalize_for_model("a b\tc"), "a　b　c");
+    CHECK_EQ(zenz::normalize_for_model("a b\tc"), "a\u3000b\u3000c");
     CHECK_EQ(zenz::normalize_for_model("一行目\r\n二行目\n"), "一行目二行目");
 }
 
@@ -23,18 +23,18 @@ static void test_utf8_helpers() {
     CHECK_EQ(zenz::utf8_prefix("あいうえお", 2), "あい");
     CHECK_EQ(zenz::utf8_prefix("あい", 5), "あい");
     // Malformed bytes become U+FFFD instead of being dropped or split.
-    CHECK_EQ(zenz::utf8_prefix("\xE3\x81", 5), "��");
+    CHECK_EQ(zenz::utf8_prefix("\xE3\x81", 5), "\uFFFD\uFFFD");
 }
 
 static void test_build_prompt() {
     CHECK_EQ(zenz::build_prompt(PromptInput{"かいとう", "", ""}),
-             "カイトウ");
+             "\uEE00カイトウ\uEE01");
     CHECK_EQ(zenz::build_prompt(PromptInput{"かいとう", "試験問題の", ""}),
-             "試験問題のカイトウ");
+             "\uEE02試験問題の\uEE00カイトウ\uEE01");
     CHECK_EQ(zenz::build_prompt(PromptInput{"かいとう", "", "を提出した"}),
-             "を提出したカイトウ");
+             "\uEE07を提出した\uEE00カイトウ\uEE01");
     CHECK_EQ(zenz::build_prompt(PromptInput{"かいとう", "問題の", "を提出"}),
-             "問題のを提出カイトウ");
+             "\uEE02問題の\uEE07を提出\uEE00カイトウ\uEE01");
 }
 
 static void test_build_prompt_truncates_context() {
@@ -42,10 +42,10 @@ static void test_build_prompt_truncates_context() {
     options.max_left_chars = 3;
     options.max_right_chars = 2;
     CHECK_EQ(zenz::build_prompt(PromptInput{"あ", "一二三四五", "六七八"}, options),
-             "三四五六七ア");
+             "\uEE02三四五\uEE07六七\uEE00ア\uEE01");
     // Newlines are removed before truncation so they do not use up the budget.
     CHECK_EQ(zenz::build_prompt(PromptInput{"あ", "一二\n三", ""}, options),
-             "一二三ア");
+             "\uEE02一二三\uEE00ア\uEE01");
 }
 
 int main() {
