@@ -62,14 +62,15 @@ Findings: the hello line arrives about 30 ms after start. Round trips match the
 n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 高校の今日し); see Phase 5.
 
-## Phase 3: Emacs client
-- [ ] Process management (lazy start, restart, shutdown).
-- [ ] Synchronous request with timeout.
-- [ ] Search functions for trigger (a) long readings and (b) fallback.
-- [ ] Context extraction from the buffer.
-- [ ] Learning exclusion via `skk-search-excluding-word-pattern-function`.
-- [ ] Candidate annotation.
-- [ ] ERT tests with a fake server.
+## Phase 3: Emacs client (done)
+- [x] Process management (lazy start, restart, shutdown).
+- [x] Synchronous request with timeout.
+- [x] Search functions for trigger (a) long readings and (b) fallback.
+- [x] Context extraction from the buffer.
+- [x] Learning exclusion via `skk-search-excluding-word-pattern-function`.
+- [x] Candidate annotation.
+- [x] ERT tests with a fake server, including a DDSKK integration test that
+      types keys in `skk-mode`.
 
 ## Phase 4: Docs and packaging
 - [ ] `README.md`: build, model download, configuration examples.

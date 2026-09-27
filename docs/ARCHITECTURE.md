@@ -109,36 +109,70 @@ the client needs no extra dependency.
 
 ## SKK Integration
 
+`skk-zenz-mode` (a global minor mode) installs everything below and removes it
+again when disabled.
+
 ### Trigger policy
-Two entries, both configurable:
+Two entries in `skk-search-prog-list`:
 
-- (a) Long readings: At the head of `skk-search-prog-list`, a search that only
-  fires when the reading has at least `skk-zenz-min-length` characters (default
-  10). zenz candidates come first for long phrases (the approach that worked with
-  Sumibi).
-- (b) Fallback: At the tail of `skk-search-prog-list`, a search that fires for any
-  okuri-nasi reading. `skk-search` stops at the first program that returns
-  candidates and keeps the rest in `skk-current-search-prog-list`; later programs
-  run only when the user steps past the last candidate. zenz candidates therefore
-  appear after the dictionary candidates and before dictionary registration.
+- (a) Long readings: `(skk-zenz-search :long)` at the head fires when the
+  reading has at least `skk-zenz-min-length` characters (default 10; nil
+  disables it). zenz candidates come first for long phrases (the approach that
+  worked with Sumibi). It requests `skk-zenz-long-candidates` (default 3).
+- (b) Fallback: `(skk-zenz-search :fallback)` at the tail fires for other
+  readings. `skk-search` stops at the first program that returns candidates and
+  keeps the rest in `skk-current-search-prog-list`; later programs run only
+  when the user steps past the last candidate. zenz candidates therefore appear
+  after the dictionary candidates and before dictionary registration. It
+  requests `skk-zenz-fallback-candidates` (default 5). It skips long readings
+  when entry (a) is in `skk-search-prog-list`, so a reading goes to zenz at
+  most once.
 
-Only okuri-nasi conversions are handled. For okuri-ari, the search returns nil.
+A reading is sent only if it matches `skk-zenz-reading-regexp` (hiragana, ー,
+and a few punctuation marks) and `skk-okuri-char` is nil. Okuri-ari and abbrev
+readings contain ASCII letters and never match.
 
 ### Context extraction
-- Left context: text before the henkan start point, limited to the current
-  paragraph (or line) and to 40 characters.
-- Right context: text after point, with the same limits.
-- Text inside the ▽ region is the reading, not context.
+- Left context: up to `skk-zenz-context-length` (default 40) characters
+  before `skk-henkan-start-point`, excluding the ▽/▼ marker just before it.
+  It may span lines; the server removes newlines.
+- Right context: up to the same number of characters after
+  `skk-henkan-end-point` (or point), stopping at the end of the line, because
+  text on following lines is often unrelated.
+
+### Candidate filtering
+The client drops candidates that are empty, equal to the reading, already in
+`skk-henkan-list`, or duplicated. It also drops candidates that SKK would
+misinterpret: `;` starts an annotation, a string that looks like a Lisp form
+`(...)` would be evaluated, and newlines or U+FFFD indicate broken output.
+Kept candidates get the annotation `;zenz` (`skk-zenz-annotation`, nil for
+none).
 
 ### Learning exclusion
 - DDSKK's `skk-search-excluding-word-pattern-function` hook receives the
-  confirmed word. If a hook function returns non-nil, the word is not added to
-  the personal dictionary. The hook is called from `skk-update-jisyo-p`.
-- The hook receives only the word, but `skk-henkan-key` is still set when it
-  runs. skk-zenz records the (reading, candidates) pairs it returned and excludes
-  a confirmed word only if it came from zenz and not from a dictionary.
-- Candidates are annotated (for example `[zenz]`) so the user can see where they
-  came from.
+  confirmed word (with its annotation). If a hook function returns non-nil, the
+  word is not added to the personal dictionary. The hook is called from
+  `skk-update-jisyo-p`, while `skk-henkan-key` is still set.
+- skk-zenz records the reading and the words it returned for the last zenz
+  search (buffer-local). A confirmed word is excluded if the reading matches,
+  the word is one of those, and its annotation is `skk-zenz-annotation`. With
+  annotations on, the same word from a dictionary has a different (or no)
+  annotation and is learned normally. With annotations off, any matching word
+  is excluded.
+
+### Process management and failures
+- The server starts on the first zenz search and must send a compatible hello
+  within `skk-zenz-startup-timeout` (5 s).
+- Each search waits up to `skk-zenz-timeout` (1 s). On timeout the search
+  returns nil and the late reply is discarded. The server still finishes the
+  old request first, so the next search may be delayed.
+- If the server cannot start, reports a different protocol version, or exits,
+  the failure is shown in the echo area and no restart is attempted for
+  `skk-zenz-retry-interval` (30 s). Conversions continue without zenz in the
+  meantime. `M-x skk-zenz-restart` clears this state.
+- `json-serialize` returns a unibyte UTF-8 string on Emacs 30 and later; the
+  client decodes it before sending so the pipe's `utf-8-unix` coding encodes
+  it exactly once.
 
 ## llama.cpp Dependency
 - Upstream llama.cpp cannot load zenz models: the GGUF declares
