@@ -71,23 +71,41 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
   text reached through different tokenizations) are removed. The server does
   not filter kana-only candidates; the client decides.
 
-## Protocol (draft)
-One JSON object per line in each direction, UTF-8.
+## Protocol
+Running `zenz-server` without `--convert` or `--prompt` serves requests: one
+JSON object per line in each direction, UTF-8. Requests are handled one at a
+time, in order.
+
+After the model loads, the server writes a hello line:
+```json
+{"hello": "zenz-server", "protocol": 1}
+```
+The client must check `protocol` against its own version. The server exits
+with status 0 when stdin reaches EOF. If the model fails to load, the server
+writes the reason to stderr and exits with a non-zero status before the hello.
 
 Request:
 ```json
-{"id": 1, "kana": "きょうはいいてんき", "left": "...", "right": "...", "n": 5}
+{"id": 1, "kana": "かいとう", "left": "試験問題の", "right": "", "n": 3}
 ```
+- `id`: any JSON value, echoed back (null if missing).
+- `kana`: the reading, required and non-empty. Hiragana is converted to katakana.
+- `left`, `right`: optional context strings. The server trims them to 40
+  characters.
+- `n`: optional number of candidates, default 1, clamped to 1..8. The beam
+  width equals `n` unless the server was started with `--beam`.
 
 Response:
 ```json
-{"id": 1, "candidates": ["今日はいい天気", "..."]}
+{"id": 1, "candidates": ["解答", "回答", "解凍"], "scores": [-0.14, -2.07, -8.25]}
 ```
+- `candidates` are best first; `scores` are total log-probabilities, in the
+  same order. Fewer than `n` candidates may be returned.
+- Errors: `{"id": 1, "error": "message"}`. A line that is not a JSON object gets
+  `"id": null`.
 
-- The server sends a hello line with its protocol version at startup.
-- Errors: `{"id": 1, "error": "message"}`.
-- Emacs 29 has native JSON support (`json-parse-string`, `json-serialize`), so the
-  client needs no extra dependency.
+Emacs 29 has native JSON support (`json-parse-string`, `json-serialize`), so
+the client needs no extra dependency.
 
 ## SKK Integration
 

@@ -31,14 +31,23 @@ add_library(zenz_model STATIC src/model.cpp)
 target_include_directories(zenz_model PUBLIC src)
 target_link_libraries(zenz_model PUBLIC llama)
 
+# nlohmann/json is vendored by llama.cpp.
+add_library(zenz_protocol STATIC src/protocol.cpp)
+target_include_directories(zenz_protocol PUBLIC src ${LLAMA_DIR}/vendor)
+target_link_libraries(zenz_protocol PUBLIC zenz_prompt)
+
 add_executable(zenz-server src/main.cpp)
-target_link_libraries(zenz-server PRIVATE zenz_prompt zenz_model)
+target_link_libraries(zenz-server PRIVATE zenz_prompt zenz_model zenz_protocol)
 
 enable_testing()
 
 add_executable(test_prompt tests/test_prompt.cpp)
 target_link_libraries(test_prompt PRIVATE zenz_prompt)
 add_test(NAME prompt COMMAND test_prompt)
+
+add_executable(test_protocol tests/test_protocol.cpp)
+target_link_libraries(test_protocol PRIVATE zenz_protocol)
+add_test(NAME protocol COMMAND test_protocol)
 
 add_executable(test_model tests/test_model.cpp)
 target_link_libraries(test_model PRIVATE zenz_prompt zenz_model)

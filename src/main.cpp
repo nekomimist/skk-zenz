@@ -9,12 +9,14 @@
 
 #include "model.h"
 #include "prompt.h"
+#include "protocol.h"
 
 namespace {
 
 void print_usage(const char* argv0) {
     std::cerr
-        << "usage: " << argv0 << " [options] --convert KANA\n"
+        << "usage: " << argv0 << " [options]                 serve JSON Lines on stdin/stdout\n"
+        << "       " << argv0 << " [options] --convert KANA\n"
         << "       " << argv0 << " [options] --prompt KANA\n"
         << "\n"
         << "  --convert KANA   convert KANA and print candidates, one per line\n"
@@ -22,8 +24,8 @@ void print_usage(const char* argv0) {
         << "  --left TEXT      left context\n"
         << "  --right TEXT     right context\n"
         << "  --model PATH     GGUF model (default: $ZENZ_MODEL)\n"
-        << "  -n N             number of candidates (default: 1)\n"
-        << "  --beam W         beam width (default: max(N, 1), at most 8)\n"
+        << "  -n N             number of candidates for --convert (default: 1)\n"
+        << "  --beam W         fixed beam width (default: number of candidates, at most 8)\n"
         << "  --threads T      inference threads (default: min(4, CPUs))\n"
         << "  --bench N        run the conversion N times and report the mean time\n"
         << "  --verbose        print llama.cpp logs, scores, and timings to stderr\n";
@@ -44,6 +46,33 @@ int default_threads() {
     return hw == 0 ? 4 : static_cast<int>(std::min(hw, 4u));
 }
 
+zenz::DecodeOptions decode_options_for(const std::string& kana, int n_best, int beam) {
+    zenz::DecodeOptions options;
+    options.n_best = n_best;
+    options.beam_width = beam > 0 ? beam : n_best;
+    // Kanji output is rarely longer in tokens than the kana input.
+    options.max_tokens = static_cast<int>(zenz::utf8_length(kana)) + 8;
+    return options;
+}
+
+int serve(zenz::Model& model, int beam) {
+    std::ios::sync_with_stdio(false);
+    auto convert = [&](const zenz::PromptInput& input, int n_best,
+                       std::vector<zenz::Candidate>* out, std::string* error) {
+        return model.generate(zenz::build_prompt(input),
+                              decode_options_for(input.kana, n_best, beam), out, error);
+    };
+    std::cout << zenz::hello_line() << std::endl;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (line.find_first_not_of(" \t\r") == std::string::npos) {
+            continue;
+        }
+        std::cout << zenz::handle_line(line, convert) << std::endl;
+    }
+    return 0;
+}
+
 double elapsed_ms(std::chrono::steady_clock::time_point since) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since)
         .count();
@@ -52,11 +81,11 @@ double elapsed_ms(std::chrono::steady_clock::time_point since) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    enum class Mode { kNone, kPrompt, kConvert } mode = Mode::kNone;
+    enum class Mode { kServe, kPrompt, kConvert } mode = Mode::kServe;
     zenz::PromptInput input;
     zenz::ModelOptions model_options;
     model_options.n_threads = default_threads();
-    zenz::DecodeOptions decode_options;
+    int n_best = 1;
     int beam = 0;
     int bench = 0;
     std::string model_path;
@@ -87,7 +116,7 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(arg, "--model") == 0) {
             model_path = value;
         } else if (std::strcmp(arg, "-n") == 0) {
-            ok = parse_int(value, &decode_options.n_best);
+            ok = parse_int(value, &n_best);
         } else if (std::strcmp(arg, "--beam") == 0) {
             ok = parse_int(value, &beam);
         } else if (std::strcmp(arg, "--bench") == 0) {
@@ -109,18 +138,12 @@ int main(int argc, char** argv) {
         std::cout << prompt << "\n";
         return 0;
     }
-    if (mode != Mode::kConvert) {
-        print_usage(argv[0]);
-        return 2;
-    }
     if (model_path.empty()) {
         std::cerr << "error: no model; pass --model or set ZENZ_MODEL\n";
         return 2;
     }
-
-    decode_options.beam_width = beam > 0 ? beam : decode_options.n_best;
-    // Kanji output is rarely longer in tokens than the kana input.
-    decode_options.max_tokens = static_cast<int>(zenz::utf8_length(input.kana)) + 8;
+    // Beams use two banks of sequences, so the context must allow the widest beam.
+    model_options.max_beam_width = std::max({zenz::kMaxCandidates, beam, n_best});
 
     const auto t_load = std::chrono::steady_clock::now();
     std::string error;
@@ -131,6 +154,11 @@ int main(int argc, char** argv) {
     }
     const double load_ms = elapsed_ms(t_load);
 
+    if (mode == Mode::kServe) {
+        return serve(*model, beam);
+    }
+
+    const zenz::DecodeOptions decode_options = decode_options_for(input.kana, n_best, beam);
     const auto t_gen = std::chrono::steady_clock::now();
     std::vector<zenz::Candidate> candidates;
     if (!model->generate(prompt, decode_options, &candidates, &error)) {

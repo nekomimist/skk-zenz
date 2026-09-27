@@ -51,10 +51,16 @@ Findings (warm, `zenz-server --bench 20`, same machine as Phase 0):
 - Lower beams sometimes produce broken text (機械学習のモデルを組んれんする);
   consider filtering in Phase 5.
 
-## Phase 2: Resident server
-- [ ] JSON Lines protocol over stdin/stdout with hello/version line.
-- [ ] Error responses, graceful shutdown on EOF.
-- [ ] Latency benchmark of repeated requests.
+## Phase 2: Resident server (done)
+- [x] JSON Lines protocol over stdin/stdout with hello/version line.
+- [x] Error responses, graceful shutdown on EOF.
+- [x] Latency benchmark of repeated requests (`scripts/bench_server.py`).
+
+Findings: the hello line arrives about 30 ms after start. Round trips match the
+`--bench` numbers above (JSON overhead is negligible): for example 20 ms for
+かいとう and 61 ms for a 22-kana reading with n=1, and 37 ms / 126 ms with
+n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
+高校の今日し); see Phase 5.
 
 ## Phase 3: Emacs client
 - [ ] Process management (lazy start, restart, shutdown).
