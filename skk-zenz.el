@@ -96,7 +96,9 @@ context."
 
 (defcustom skk-zenz-reading-regexp "\\`[ぁ-ゖゝゞー、。・！？]+\\'"
   "Regexp that a reading must match to be sent to zenz.
-Okuri-ari readings never match because they end with an ASCII letter."
+Okuri-ari readings never match because they end with an ASCII letter, so
+zenz does not convert them.  For reranking okuri-ari candidates, the
+stem reading joined with the okurigana must match instead."
   :type 'regexp)
 
 (defcustom skk-zenz-annotation "zenz"
@@ -429,14 +431,16 @@ text, in order, or is nil on failure or timeout."
         (buffer-substring-no-properties
          (max (point-min) (- end skk-zenz-context-length)) end)))))
 
-(defun skk-zenz--right-context ()
-  "Return the text after the conversion target, up to the end of the line."
+(defun skk-zenz--right-context (&optional skip)
+  "Return the text after the conversion target, up to the end of the line.
+SKIP characters right after the target, such as okurigana, are left out."
   (if (<= skk-zenz-context-length 0)
       ""
-    (let* ((beg (or (skk-zenz--marker-position skk-henkan-end-point) (point)))
-           (end (min (+ beg skk-zenz-context-length)
-                     (save-excursion (goto-char beg) (line-end-position)))))
-      (buffer-substring-no-properties beg (max beg end)))))
+    (let* ((target-end (or (skk-zenz--marker-position skk-henkan-end-point) (point)))
+           (eol (save-excursion (goto-char target-end) (line-end-position)))
+           (beg (min (+ target-end (or skip 0)) eol))
+           (end (min (+ beg skk-zenz-context-length) eol)))
+      (buffer-substring-no-properties beg end))))
 
 (defun skk-zenz--eligible-p (key trigger)
   "Return non-nil if reading KEY should be sent to zenz for TRIGGER."
@@ -494,11 +498,24 @@ the entry at the tail."
 
 ;;; Reranking
 
-(defun skk-zenz--rerank-eligible-p (key)
-  "Return non-nil if dictionary candidates for reading KEY may be reranked."
-  (and (stringp key)
-       (null skk-okuri-char)
-       (string-match-p skk-zenz-reading-regexp key)))
+(defun skk-zenz--rerank-reading (key)
+  "Return (READING . OKURIGANA) for scoring candidates of reading KEY.
+For an okuri-nashi KEY, READING is KEY and OKURIGANA is empty.  For an
+okuri-ari KEY such as \"かk\", READING joins the stem reading and
+`skk-henkan-okurigana' (\"かく\"), and OKURIGANA is appended to each
+candidate (\"書\" is scored as \"書く\").  Return nil if KEY may not be
+reranked."
+  (when (stringp key)
+    (if (string-match "\\`\\([^a-z]+\\)[a-z]\\'" key)
+        (let ((stem (match-string 1 key))
+              (okurigana skk-henkan-okurigana))
+          (when (and (stringp okurigana) (not (string-empty-p okurigana)))
+            (let ((reading (concat stem okurigana)))
+              (and (string-match-p skk-zenz-reading-regexp reading)
+                   (cons reading okurigana)))))
+      (and (null skk-okuri-char)
+           (string-match-p skk-zenz-reading-regexp key)
+           (cons key "")))))
 
 (defun skk-zenz--scorable-text (word)
   "Return the text of dictionary candidate WORD to score, or nil.
@@ -548,32 +565,38 @@ positions."
 (defun skk-zenz--rerank (key words)
   "Return dictionary candidates WORDS for reading KEY reordered by zenz.
 Return WORDS unchanged if KEY is not eligible or scoring fails."
-  (if (not (and (cdr words) (skk-zenz--rerank-eligible-p key)))
-      words
-    (let ((texts nil)
-          (pairs nil))
-      ;; Score each distinct text once; WORDS may hold the same text with
-      ;; different annotations.
-      (dolist (word (seq-take words skk-zenz-rerank-limit))
-        (when-let* ((text (skk-zenz--scorable-text word)))
-          (unless (member text texts)
-            (push text texts))
-          (push (cons word text) pairs)))
-      (setq texts (nreverse texts))
-      (let ((scores (and (cdr texts)
-                         (skk-zenz--score key (skk-zenz--left-context)
-                                          (skk-zenz--right-context) texts))))
-        (if (null scores)
-            words
-          (let* ((by-text (cl-mapcar #'cons texts scores))
-                 (result (skk-zenz--rerank-words
-                          words
-                          (mapcar (lambda (pair)
-                                    (cons (car pair) (cdr (assoc (cdr pair) by-text))))
-                                  pairs))))
-            (unless (equal result words)
-              (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
-            result))))))
+  (if-let* (((cdr words))
+            (reading (skk-zenz--rerank-reading key)))
+      (let ((okurigana (cdr reading))
+            (texts nil)
+            (pairs nil))
+        ;; Score each distinct text once; WORDS may hold the same text with
+        ;; different annotations.
+        (dolist (word (seq-take words skk-zenz-rerank-limit))
+          (when-let* ((text (skk-zenz--scorable-text word)))
+            (setq text (concat text okurigana))
+            (unless (member text texts)
+              (push text texts))
+            (push (cons word text) pairs)))
+        (setq texts (nreverse texts))
+        (let ((scores (and (cdr texts)
+                           ;; The okurigana follows the conversion target in
+                           ;; the buffer and is part of the scored text.
+                           (skk-zenz--score (car reading) (skk-zenz--left-context)
+                                            (skk-zenz--right-context (length okurigana))
+                                            texts))))
+          (if (null scores)
+              words
+            (let* ((by-text (cl-mapcar #'cons texts scores))
+                   (result (skk-zenz--rerank-words
+                            words
+                            (mapcar (lambda (pair)
+                                      (cons (car pair) (cdr (assoc (cdr pair) by-text))))
+                                    pairs))))
+              (unless (equal result words)
+                (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
+              result))))
+    words))
 
 ;;;###autoload
 (defun skk-zenz-rerank-search (programs)

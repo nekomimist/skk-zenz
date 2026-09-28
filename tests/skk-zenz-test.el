@@ -258,6 +258,62 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
             (should (equal (buffer-string) "かな|左|甲|乙\n"))))
       (delete-file log))))
 
+(ert-deftest skk-zenz-test-rerank-reading ()
+  (let ((skk-okuri-char nil)
+        (skk-henkan-okurigana nil))
+    (should (equal (skk-zenz--rerank-reading "かな") '("かな" . "")))
+    (should-not (skk-zenz--rerank-reading "abc"))
+    (should-not (skk-zenz--rerank-reading nil))
+    ;; Okuri-ari needs the okurigana DDSKK recorded.
+    (should-not (skk-zenz--rerank-reading "かk"))
+    (let ((skk-henkan-okurigana "く"))
+      (should (equal (skk-zenz--rerank-reading "かk") '("かく" . "く"))))
+    (let ((skk-henkan-okurigana "っ"))
+      (should (equal (skk-zenz--rerank-reading "いt") '("いっ" . "っ"))))
+    (let ((skk-okuri-char "k"))
+      (should-not (skk-zenz--rerank-reading "か")))))
+
+(defmacro skk-zenz-test--with-okuri-henkan (text key okurigana &rest body)
+  "Run BODY during okuri-ari conversion of KEY with OKURIGANA.
+TEXT must contain \"▼\" followed by the stem reading and OKURIGANA, as
+DDSKK leaves the buffer; point is left after OKURIGANA."
+  (declare (indent 3))
+  `(with-temp-buffer
+     (insert ,text)
+     (goto-char (point-min))
+     (search-forward "▼")
+     (let* ((skk-henkan-key ,key)
+            (skk-henkan-okurigana ,okurigana)
+            (skk-okuri-char (substring ,key -1))
+            (skk-henkan-list nil)
+            (skk-henkan-start-point (point-marker))
+            (skk-henkan-end-point (progn (forward-char (1- (length ,key))) (point-marker))))
+       (forward-char (length ,okurigana))
+       ,@body)))
+
+(ert-deftest skk-zenz-test-right-context-skips-okurigana ()
+  (skk-zenz-test--with-okuri-henkan "左▼かく右です\n次" "かk" "く"
+    (let ((skk-zenz-context-length 40))
+      (should (equal (skk-zenz--right-context) "く右です"))
+      (should (equal (skk-zenz--right-context 1) "右です"))
+      (should (equal (skk-zenz--right-context 10) "")))))
+
+(ert-deftest skk-zenz-test-rerank-okuri-ari ()
+  (let ((log (make-temp-file "skk-zenz-log")))
+    (unwind-protect
+        (skk-zenz-test--with-server (list (concat "FAKE_ZENZ_LOG=" log))
+          (skk-zenz-test--with-okuri-henkan "左▼かく右" "かk" "く"
+            (let ((skk-zenz-rerank-method 'promote)
+                  (skk-zenz-rerank-timeout 3.0))
+              ;; Stems are scored with the okurigana and returned without it.
+              (should (equal (skk-zenz-rerank-search '('("描1" "書9;注釈")))
+                             '("書9;注釈" "描1")))))
+          (with-temp-buffer
+            (let ((coding-system-for-read 'utf-8-unix))
+              (insert-file-contents log))
+            (should (equal (buffer-string) "かく|左|描1く|書9く\n"))))
+      (delete-file log))))
+
 (ert-deftest skk-zenz-test-rerank-failures-keep-dictionary-order ()
   (skk-zenz-test--with-server nil
     (let ((skk-zenz-rerank-timeout 0.2)
@@ -396,7 +452,9 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
          (skk-show-tooltip nil)
          (skk-egg-like-newline t))
     (with-temp-file skk-large-jisyo
-      (insert ";; okuri-ari entries.\n;; okuri-nasi entries.\n"
+      (insert ";; okuri-ari entries.\n"
+              "かk /描1/書9/\n"
+              ";; okuri-nasi entries.\n"
               "かいとう /回答1/解答9/\nきしゃ /汽車/\n"))
     ;; DDSKK pauses to announce files it creates, so create them up front.
     (dolist (file (list skk-jisyo skk-record-file))
@@ -436,7 +494,10 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                   (skk-zenz-rerank-method 'promote)
                   (skk-zenz-rerank-timeout 3.0))
               (should (equal (skk-zenz-test--type "" "K a i t o u SPC")
-                             '("解答9" ("解答9" "回答1")))))
+                             '("解答9" ("解答9" "回答1"))))
+              ;; Okuri-ari: the stem 書9 is promoted, the okurigana kept.
+              (should (equal (skk-zenz-test--type "" "K a K u")
+                             '("書9く" ("書9" "描1")))))
             (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
                            (buffer-string))))
               (should (string-match-p "^きしゃ /きしゃ-1/汽車/$" jisyo))
@@ -469,6 +530,11 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
           (let ((skk-zenz-rerank-method 'promote)
                 (skk-zenz-rerank-timeout 3.0))
             (should (equal (skk-zenz-rerank-search '('("回答" "解凍" "解答")))
-                           '("解答" "回答" "解凍")))))))))
+                           '("解答" "回答" "解凍")))))
+        (skk-zenz-test--with-okuri-henkan "絵を▼かく" "かk" "く"
+          (let ((skk-zenz-rerank-method 'promote)
+                (skk-zenz-rerank-timeout 3.0))
+            (should (equal (skk-zenz-rerank-search '('("書" "描" "欠")))
+                           '("描" "書" "欠")))))))))
 
 ;;; skk-zenz-test.el ends here

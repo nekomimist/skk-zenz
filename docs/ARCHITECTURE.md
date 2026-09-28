@@ -10,7 +10,8 @@ Status: draft. Phase 0 findings are recorded in `ROADMAP.md`.
 
 ## Non-goals (for now)
 - Replacing SKK dictionaries.
-- Okuri-ari (送りあり) conversion.
+- Okuri-ari (送りあり) conversion by zenz. Okuri-ari dictionary candidates
+  are reranked, though.
 - GPU inference. The model is small (95M parameters, ~74 MB at Q5_K_M), and CPU
   inference is fast enough.
 
@@ -195,10 +196,20 @@ is in `ROADMAP.md` (Phase 6).
   it again when disabled. Entries before the run (such as the kakutei
   dictionary) and after it (such as `skk-search-katakana-maybe`) are kept. If
   the list already calls `skk-zenz-rerank-search`, the mode leaves it alone.
-- Only okuri-nashi readings that match `skk-zenz-reading-regexp` and have at
-  least two candidates are reranked. The first `skk-zenz-rerank-limit` (20)
-  candidates are scored with the `score` op, with the same context as
-  conversions. Annotations are removed before scoring; Lisp forms are not
+- Readings with at least two candidates are reranked. The first
+  `skk-zenz-rerank-limit` (20) candidates are scored with the `score` op,
+  with the same context as conversions.
+  - Okuri-nashi: the reading is `skk-henkan-key`, which must match
+    `skk-zenz-reading-regexp`.
+  - Okuri-ari: dictionary candidates are stems. DDSKK's
+    `skk-set-okurigana` sets `skk-henkan-key` to the stem reading plus the
+    okuri character (かk) and `skk-henkan-okurigana` to the typed okurigana
+    (く), and leaves the okurigana in the buffer right after
+    `skk-henkan-end-point`. The reading sent is the stem reading plus the
+    okurigana (かく), each candidate is scored with the okurigana appended
+    (書く, 描く), and the right context starts after the okurigana. The
+    joined reading must match `skk-zenz-reading-regexp`. zenz still does not
+    generate okuri-ari candidates. Annotations are removed before scoring; Lisp forms are not
   scored and keep their positions.
 - `promote` (default): move zenz's best candidate to the front if its score
   beats the first candidate's by more than `skk-zenz-rerank-threshold` (1.0);

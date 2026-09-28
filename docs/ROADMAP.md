@@ -89,7 +89,7 @@ context, like Zenzai's candidate evaluation. Design: `ARCHITECTURE.md`.
 - [x] `score` op in zenz-server (teacher forcing, shared prompt KV cache).
 - [x] Offline evaluation (`scripts/eval_rerank.py`).
 - [x] Client: a search program that merges dictionary programs and reranks.
-- [ ] Okuri-ari readings (stem + okurigana is scored as one text).
+- [x] Okuri-ari readings (stem + okurigana is scored as one text).
 
 Findings (2026-09-28, 12 blog posts from 2023 to 2026 by the user, 1376
 instances where the written form is one of two or more dictionary
@@ -113,6 +113,8 @@ scored):
 - `promote` uses θ=1 rather than 2: with θ=2, 解答 (−0.14) did not replace
   回答 (−2.07) after 試験問題の. θ=1 scores 0.986 (8 broken) with context
   and 0.933 without.
+- Okuri-ari with the real model: 手紙を → 書く, 絵を → 描く, but 注意を still
+  prefers 書く (−0.57) over 欠く (−1.14).
 - Broken cases are mostly equally valid variants (稼動 → 稼働) or rare words
   (逃避 → 頭皮, 代替 → 大体).
 - Caveats: the corpus is small and single-author, the evaluator's
@@ -121,7 +123,7 @@ scored):
 
 ## Later
 - Linux ARM64 support.
-- Okuri-ari conversion.
+- Okuri-ari conversion by zenz (candidates beyond the dictionary).
 - Asynchronous prefetch while typing in ▽ mode.
 - v3 condition tags (profile, topic, style).
 
