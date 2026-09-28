@@ -52,9 +52,8 @@ private:
     llama_batch batch_;
 };
 
-// Returns log-softmax of `logits` for the top `k` tokens, best first.
-std::vector<std::pair<llama_token, float>> top_k_log_probs(const float* logits, int n_vocab,
-                                                           int k) {
+// Returns log(sum(exp(logits))), the log-softmax normalizer.
+float log_sum_exp(const float* logits, int n_vocab) {
     float max_logit = -std::numeric_limits<float>::infinity();
     for (int i = 0; i < n_vocab; ++i) {
         max_logit = std::max(max_logit, logits[i]);
@@ -63,8 +62,17 @@ std::vector<std::pair<llama_token, float>> top_k_log_probs(const float* logits, 
     for (int i = 0; i < n_vocab; ++i) {
         sum += std::exp(static_cast<double>(logits[i] - max_logit));
     }
-    const float log_z = max_logit + static_cast<float>(std::log(sum));
+    return max_logit + static_cast<float>(std::log(sum));
+}
 
+float log_prob(const float* logits, int n_vocab, llama_token token) {
+    return logits[token] - log_sum_exp(logits, n_vocab);
+}
+
+// Returns log-softmax of `logits` for the top `k` tokens, best first.
+std::vector<std::pair<llama_token, float>> top_k_log_probs(const float* logits, int n_vocab,
+                                                           int k) {
+    const float log_z = log_sum_exp(logits, n_vocab);
     std::vector<std::pair<llama_token, float>> top;
     top.reserve(n_vocab);
     for (int i = 0; i < n_vocab; ++i) {
@@ -105,8 +113,10 @@ std::unique_ptr<Model> Model::load(const std::string& path, const ModelOptions& 
     ctx_params.n_batch = options.n_ctx;
     ctx_params.n_threads = options.n_threads;
     ctx_params.n_threads_batch = options.n_threads;
-    // Beams live in two banks of sequences; see Model::generate.
-    ctx_params.n_seq_max = static_cast<std::uint32_t>(2 * options.max_beam_width);
+    // Beams live in two banks of sequences (see Model::generate); scored texts
+    // use one sequence each next to the prompt's (see Model::score).
+    ctx_params.n_seq_max =
+        static_cast<std::uint32_t>(std::max(2 * options.max_beam_width, 1 + options.score_batch));
     // Beams share the prompt's KV cells, which requires a unified cache.
     ctx_params.kv_unified = true;
     ctx_params.no_perf = true;
@@ -267,6 +277,99 @@ bool Model::generate(const std::string& prompt, const DecodeOptions& options,
         finished.resize(n_best);
     }
     *out = std::move(finished);
+    return true;
+}
+
+// Teacher-forced scoring. The prompt is decoded once on sequence 0; the first
+// token of every text is scored from its last logits. Texts are then decoded in
+// chunks, each text on its own sequence that shares the prompt's KV cells, and
+// every position requests logits for the next token (or end-of-sequence).
+bool Model::score(const std::string& prompt, const std::vector<std::string>& texts,
+                  std::vector<float>* out, std::string* error) {
+    out->assign(texts.size(), 0.0f);
+    if (texts.empty()) {
+        return true;
+    }
+    const int n_vocab = llama_vocab_n_tokens(vocab_);
+    const llama_token eos = llama_vocab_eos(vocab_);
+    const int n_ctx = static_cast<int>(options_.n_ctx);
+    const int max_seqs = std::max(options_.score_batch, 1);
+
+    const std::vector<llama_token> prompt_tokens = tokenize(prompt, false);
+    const int n_prompt = static_cast<int>(prompt_tokens.size());
+    if (n_prompt == 0 || n_prompt >= n_ctx) {
+        *error = "prompt is too long";
+        return false;
+    }
+    // Each text becomes its tokens followed by EOS; the EOS itself is never decoded.
+    std::vector<std::vector<llama_token>> targets;
+    targets.reserve(texts.size());
+    for (const std::string& text : texts) {
+        std::vector<llama_token> tokens = tokenize(text, false);
+        tokens.push_back(eos);
+        if (static_cast<int>(tokens.size()) > n_ctx - n_prompt) {
+            *error = "candidate is too long";
+            return false;
+        }
+        targets.push_back(std::move(tokens));
+    }
+
+    llama_memory_t mem = llama_get_memory(ctx_);
+    llama_memory_clear(mem, true);
+
+    Batch batch(n_ctx);
+    for (int i = 0; i < n_prompt; ++i) {
+        batch.add(prompt_tokens[i], i, 0, i == n_prompt - 1);
+    }
+    if (llama_decode(ctx_, batch.get()) != 0) {
+        *error = "llama_decode failed on prompt";
+        return false;
+    }
+    std::vector<float> first_logits(llama_get_logits_ith(ctx_, n_prompt - 1),
+                                    llama_get_logits_ith(ctx_, n_prompt - 1) + n_vocab);
+    const float first_log_z = log_sum_exp(first_logits.data(), n_vocab);
+    for (std::size_t t = 0; t < targets.size(); ++t) {
+        (*out)[t] = first_logits[targets[t].front()] - first_log_z;
+    }
+
+    std::size_t next = 0;
+    while (next < targets.size()) {
+        // Fill one chunk: at most max_seqs texts whose cells fit in the context.
+        batch.clear();
+        std::vector<std::pair<std::size_t, int>> chunk;  // (text index, first batch index)
+        int cells = n_prompt;
+        while (next < targets.size() && static_cast<int>(chunk.size()) < max_seqs) {
+            const std::vector<llama_token>& tokens = targets[next];
+            const int n_input = static_cast<int>(tokens.size()) - 1;
+            if (cells + n_input > n_ctx) {
+                break;
+            }
+            const llama_seq_id seq = static_cast<llama_seq_id>(1 + chunk.size());
+            if (n_input > 0) {
+                llama_memory_seq_cp(mem, 0, seq, -1, -1);
+            }
+            chunk.emplace_back(next, batch.size());
+            for (int j = 0; j < n_input; ++j) {
+                batch.add(tokens[j], n_prompt + j, seq, true);
+            }
+            cells += n_input;
+            ++next;
+        }
+        if (batch.size() > 0 && llama_decode(ctx_, batch.get()) != 0) {
+            *error = "llama_decode failed while scoring";
+            return false;
+        }
+        for (const auto& [t, start] : chunk) {
+            const std::vector<llama_token>& tokens = targets[t];
+            for (int j = 1; j < static_cast<int>(tokens.size()); ++j) {
+                (*out)[t] += log_prob(llama_get_logits_ith(ctx_, start + j - 1), n_vocab,
+                                      tokens[j]);
+            }
+        }
+        for (int s = 1; s <= static_cast<int>(chunk.size()); ++s) {
+            llama_memory_seq_rm(mem, s, -1, -1);
+        }
+    }
     return true;
 }
 

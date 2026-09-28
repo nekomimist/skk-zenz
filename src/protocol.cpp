@@ -37,12 +37,20 @@ std::string hello_line() {
     return dump(json{{"hello", "zenz-server"}, {"protocol", kProtocolVersion}});
 }
 
-std::string handle_line(const std::string& line, const ConvertFn& convert) {
+std::string handle_line(const std::string& line, const Handlers& handlers) {
     json request = json::parse(line, nullptr, false);
     if (request.is_discarded() || !request.is_object()) {
         return error_line(nullptr, "invalid JSON object");
     }
     const json id = request.value("id", json(nullptr));
+
+    std::string op = "convert";
+    if (!optional_string(request, "op", &op)) {
+        return error_line(id, "\"op\" must be a string");
+    }
+    if (op != "convert" && op != "score") {
+        return error_line(id, "unknown op: " + op);
+    }
 
     PromptInput input;
     auto kana = request.find("kana");
@@ -53,6 +61,34 @@ std::string handle_line(const std::string& line, const ConvertFn& convert) {
     if (!optional_string(request, "left", &input.left) ||
         !optional_string(request, "right", &input.right)) {
         return error_line(id, "\"left\" and \"right\" must be strings");
+    }
+
+    if (op == "score") {
+        auto texts = request.find("candidates");
+        if (texts == request.end() || !texts->is_array()) {
+            return error_line(id, "\"candidates\" must be an array of strings");
+        }
+        if (texts->size() > static_cast<std::size_t>(kMaxScoreCandidates)) {
+            return error_line(id, "too many candidates (at most " +
+                                      std::to_string(kMaxScoreCandidates) + ")");
+        }
+        std::vector<std::string> candidates;
+        for (const json& text : *texts) {
+            if (!text.is_string()) {
+                return error_line(id, "\"candidates\" must be an array of strings");
+            }
+            candidates.push_back(text.get<std::string>());
+        }
+        std::vector<float> scores;
+        std::string error;
+        try {
+            if (!handlers.score(input, candidates, &scores, &error)) {
+                return error_line(id, error.empty() ? "scoring failed" : error);
+            }
+        } catch (const std::exception& e) {
+            return error_line(id, e.what());
+        }
+        return dump(json{{"id", id}, {"scores", scores}});
     }
 
     int n_best = 1;
@@ -67,7 +103,7 @@ std::string handle_line(const std::string& line, const ConvertFn& convert) {
     std::vector<Candidate> candidates;
     std::string error;
     try {
-        if (!convert(input, n_best, &candidates, &error)) {
+        if (!handlers.convert(input, n_best, &candidates, &error)) {
             return error_line(id, error.empty() ? "conversion failed" : error);
         }
     } catch (const std::exception& e) {

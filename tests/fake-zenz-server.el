@@ -39,7 +39,7 @@
 
 (fake-zenz--print
  `((hello . "zenz-server")
-   (protocol . ,(string-to-number (or (getenv "FAKE_ZENZ_PROTOCOL") "1")))))
+   (protocol . ,(string-to-number (or (getenv "FAKE_ZENZ_PROTOCOL") "2")))))
 
 (condition-case nil
     (while t

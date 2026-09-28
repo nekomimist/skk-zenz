@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "model.h"
 #include "prompt.h"
@@ -23,6 +24,7 @@ void print_usage(const char* argv0) {
         << "  --prompt KANA    print the model prompt for KANA and exit\n"
         << "  --left TEXT      left context\n"
         << "  --right TEXT     right context\n"
+        << "  --score TEXT     with --convert, print the score of TEXT instead (repeatable)\n"
         << "  --model PATH     GGUF model (default: $ZENZ_MODEL)\n"
         << "  -n N             number of candidates for --convert (default: 1)\n"
         << "  --beam W         fixed beam width (default: number of candidates, at most 8)\n"
@@ -55,12 +57,29 @@ zenz::DecodeOptions decode_options_for(const std::string& kana, int n_best, int 
     return options;
 }
 
+// Candidates go through the same substitutions as the prompt, so that spaces do
+// not become [UNK].
+bool score(zenz::Model& model, const zenz::PromptInput& input,
+           const std::vector<std::string>& texts, std::vector<float>* out, std::string* error) {
+    std::vector<std::string> normalized;
+    normalized.reserve(texts.size());
+    for (const std::string& text : texts) {
+        normalized.push_back(zenz::normalize_for_model(text));
+    }
+    return model.score(zenz::build_prompt(input), normalized, out, error);
+}
+
 int serve(zenz::Model& model, int beam) {
     std::ios::sync_with_stdio(false);
-    auto convert = [&](const zenz::PromptInput& input, int n_best,
-                       std::vector<zenz::Candidate>* out, std::string* error) {
+    zenz::Handlers handlers;
+    handlers.convert = [&](const zenz::PromptInput& input, int n_best,
+                           std::vector<zenz::Candidate>* out, std::string* error) {
         return model.generate(zenz::build_prompt(input),
                               decode_options_for(input.kana, n_best, beam), out, error);
+    };
+    handlers.score = [&](const zenz::PromptInput& input, const std::vector<std::string>& texts,
+                         std::vector<float>* out, std::string* error) {
+        return score(model, input, texts, out, error);
     };
     std::cout << zenz::hello_line() << std::endl;
     std::string line;
@@ -68,7 +87,7 @@ int serve(zenz::Model& model, int beam) {
         if (line.find_first_not_of(" \t\r") == std::string::npos) {
             continue;
         }
-        std::cout << zenz::handle_line(line, convert) << std::endl;
+        std::cout << zenz::handle_line(line, handlers) << std::endl;
     }
     return 0;
 }
@@ -88,6 +107,7 @@ int main(int argc, char** argv) {
     int n_best = 1;
     int beam = 0;
     int bench = 0;
+    std::vector<std::string> score_texts;
     std::string model_path;
     if (const char* env = std::getenv("ZENZ_MODEL")) {
         model_path = env;
@@ -113,6 +133,8 @@ int main(int argc, char** argv) {
             input.left = value;
         } else if (std::strcmp(arg, "--right") == 0) {
             input.right = value;
+        } else if (std::strcmp(arg, "--score") == 0) {
+            score_texts.push_back(value);
         } else if (std::strcmp(arg, "--model") == 0) {
             model_path = value;
         } else if (std::strcmp(arg, "-n") == 0) {
@@ -156,6 +178,29 @@ int main(int argc, char** argv) {
 
     if (mode == Mode::kServe) {
         return serve(*model, beam);
+    }
+
+    if (!score_texts.empty()) {
+        std::vector<float> scores;
+        const auto t_score = std::chrono::steady_clock::now();
+        if (!score(*model, input, score_texts, &scores, &error)) {
+            std::cerr << "error: " << error << "\n";
+            return 1;
+        }
+        const double score_ms = elapsed_ms(t_score);
+        if (bench > 0) {
+            std::vector<float> ignored;
+            const auto t_bench = std::chrono::steady_clock::now();
+            for (int i = 0; i < bench; ++i) {
+                score(*model, input, score_texts, &ignored, &error);
+            }
+            std::cerr << "bench: first " << score_ms << " ms, mean of " << bench << " "
+                      << elapsed_ms(t_bench) / bench << " ms\n";
+        }
+        for (std::size_t i = 0; i < score_texts.size(); ++i) {
+            std::cout << scores[i] << "\t" << score_texts[i] << "\n";
+        }
+        return 0;
     }
 
     const zenz::DecodeOptions decode_options = decode_options_for(input.kana, n_best, beam);

@@ -42,7 +42,7 @@
   :group 'skk
   :prefix "skk-zenz-")
 
-(defconst skk-zenz-protocol-version 1
+(defconst skk-zenz-protocol-version 2
   "Protocol version this client speaks.  Must match `zenz-server'.")
 
 (defconst skk-zenz--directory

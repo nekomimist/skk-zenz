@@ -17,6 +17,8 @@ struct ModelOptions {
     std::uint32_t n_ctx = 1024;
     // Upper bound for DecodeOptions::beam_width.
     int max_beam_width = 8;
+    // Texts scored together in one decode by Model::score.
+    int score_batch = 32;
     bool verbose = false;
 };
 
@@ -45,6 +47,12 @@ public:
     // Returns false and sets *error on failure.
     bool generate(const std::string& prompt, const DecodeOptions& options,
                   std::vector<Candidate>* out, std::string* error);
+
+    // Scores each text as a complete completion of `prompt`: the sum of the
+    // log-probabilities of its tokens and the end-of-sequence token. The prompt
+    // is decoded once and shared. Returns false and sets *error on failure.
+    bool score(const std::string& prompt, const std::vector<std::string>& texts,
+               std::vector<float>* out, std::string* error);
 
     std::vector<std::int32_t> tokenize(const std::string& text, bool add_bos) const;
     std::string detokenize(const std::vector<std::int32_t>& tokens) const;

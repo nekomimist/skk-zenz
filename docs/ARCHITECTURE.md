@@ -71,6 +71,22 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
   text reached through different tokenizations) are removed. The server does
   not filter kana-only candidates; the client decides.
 
+## Scoring
+- The `score` op computes, for each given text, the log-probability that the
+  model produces exactly that text after the prompt: the sum of its token
+  log-probabilities plus the end-of-sequence token (teacher forcing). The
+  end-of-sequence term penalizes texts that cover only part of the reading.
+- Texts go through the same space/newline substitution as the prompt and are
+  tokenized on their own. A text the model would generate through a different
+  tokenization gets the score of the canonical tokenization.
+- The prompt is decoded once on sequence 0. The first token of every text is
+  scored from the prompt's last logits. The texts are then decoded in chunks of
+  up to 32 (`ModelOptions::score_batch`), each on its own sequence that shares
+  the prompt's KV cells through `llama_memory_seq_cp`, with logits requested at
+  every position. A chunk is one `llama_decode` call.
+- Scoring five candidates for かいとう with a short left context takes about
+  24 ms with 4 threads.
+
 ## Protocol
 Running `zenz-server` without `--convert` or `--prompt` serves requests: one
 JSON object per line in each direction, UTF-8. Requests are handled one at a
@@ -78,17 +94,21 @@ time, in order.
 
 After the model loads, the server writes a hello line:
 ```json
-{"hello": "zenz-server", "protocol": 1}
+{"hello": "zenz-server", "protocol": 2}
 ```
 The client must check `protocol` against its own version. The server exits
 with status 0 when stdin reaches EOF. If the model fails to load, the server
 writes the reason to stderr and exits with a non-zero status before the hello.
 
-Request:
+Protocol 2 added the `score` op. A protocol 1 server would treat a score
+request as a conversion, so the client refuses protocol 1 servers.
+
+Conversion request:
 ```json
 {"id": 1, "kana": "かいとう", "left": "試験問題の", "right": "", "n": 3}
 ```
 - `id`: any JSON value, echoed back (null if missing).
+- `op`: optional, `"convert"` (default) or `"score"`.
 - `kana`: the reading, required and non-empty. Hiragana is converted to katakana.
 - `left`, `right`: optional context strings. The server trims them to 40
   characters.
@@ -101,7 +121,18 @@ Response:
 ```
 - `candidates` are best first; `scores` are total log-probabilities, in the
   same order. Fewer than `n` candidates may be returned.
-- Errors: `{"id": 1, "error": "message"}`. A line that is not a JSON object gets
+
+Score request: the same fields as a conversion request except `n`, plus
+`candidates`, an array of at most 64 strings.
+```json
+{"id": 2, "op": "score", "kana": "かいとう", "left": "試験問題の", "candidates": ["回答", "解答", "解凍"]}
+```
+Response, one score per candidate in the request order:
+```json
+{"id": 2, "scores": [-2.07, -0.14, -8.25]}
+```
+
+Errors (either op): `{"id": 1, "error": "message"}`. A line that is not a JSON object gets
   `"id": null`.
 
 Emacs 29 has native JSON support (`json-parse-string`, `json-serialize`), so

@@ -12,19 +12,31 @@
 namespace zenz {
 
 // Bump on incompatible changes; the client checks it against its own version.
-constexpr int kProtocolVersion = 1;
+constexpr int kProtocolVersion = 2;
 
 // Upper bound for the "n" field of a request.
 constexpr int kMaxCandidates = 8;
 
+// Upper bound for the number of texts in a score request.
+constexpr int kMaxScoreCandidates = 64;
+
 using ConvertFn = std::function<bool(const PromptInput& input, int n_best,
                                      std::vector<Candidate>* out, std::string* error)>;
+
+// Returns one score per text, in the same order.
+using ScoreFn = std::function<bool(const PromptInput& input, const std::vector<std::string>& texts,
+                                   std::vector<float>* out, std::string* error)>;
+
+struct Handlers {
+    ConvertFn convert;
+    ScoreFn score;
+};
 
 // First line the server writes after the model has loaded.
 std::string hello_line();
 
-// Parses one request line, runs `convert`, and returns one response line
-// (without the trailing newline). Never throws.
-std::string handle_line(const std::string& line, const ConvertFn& convert);
+// Parses one request line, runs the handler for its "op", and returns one
+// response line (without the trailing newline). Never throws.
+std::string handle_line(const std::string& line, const Handlers& handlers);
 
 }  // namespace zenz
