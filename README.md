@@ -9,6 +9,7 @@
 - それ以外の読みでは、辞書の候補を出し尽くしたあとに zenz の候補を出します。辞書登録モードに入るのは、その候補も尽きたときです。
 - zenz は変換対象の前後の文章を文脈として使います。同じ読みでも文脈によって変換結果が変わります（試験問題の**解答**、電子レンジで**解凍**）。
 - 長い読みで zenz の候補を確定しても、個人辞書には登録しません。それ以外で zenz の候補を確定したときは、辞書の候補と同じように個人辞書に学習します。
+- zenz で辞書の候補を並べ替え、文脈に合うものを先に出すこともできます（`skk-zenz-rerank`、既定では無効）。
 
 開発中のソフトウェアです。動作確認は Linux x86_64 上の Emacs 29.4 と 31.1 で行っています。
 
@@ -58,6 +59,30 @@ skk-zenz をこのディレクトリから読み込むと、サーバとモデ�
 対象は `build/zenz-server` と `models/zenz-v3.2-small-Q5_K_M.gguf` です。別の場所に置いた場合は、
 `skk-zenz-server-program` と `skk-zenz-model-file`（または環境変数 `ZENZ_MODEL`）を設定してください。
 
+### 辞書の候補の並べ替え
+
+`skk-zenz-rerank` を `t` にしてから `skk-zenz-mode` を有効にすると、辞書の候補を文脈に合わせて並べ替えます。
+
+```elisp
+(setq skk-zenz-rerank t)
+(skk-zenz-mode 1)
+```
+
+`skk-zenz-mode` は、`skk-search-prog-list` のうち最初に連続して並ぶ辞書検索をまとめます。
+まとめた部分は 1 つの `(skk-zenz-rerank-search '(...))` になります。対象になる検索関数は `skk-zenz-rerank-programs` で決まります。
+まとめた辞書は一度にすべて引き、候補を重複なく合わせてから、zenz が求めた「この文脈でこの表記になる確率」で並べ替えます。
+モードを無効にすると、元の辞書検索に戻します。
+`skk-search-prog-list` に `skk-zenz-rerank-search` を自分で書いてもかまいません。この場合、モードはリストを書き換えません。
+
+- 既定の `promote` は、zenz のスコアが最も高い候補を先頭に移します。ただし、そのスコアが先頭の候補を `skk-zenz-rerank-threshold` より大きく上回るときだけです。ほかの候補は辞書の順のままです。
+- `mix` は、zenz のスコアから辞書での順位の分（`skk-zenz-rerank-weight` × log(1 + 順位)）を引いた値で、すべての候補を並べ替えます。
+- 個人辞書の学習はこれまでどおりです。最後に確定した語は辞書の先頭に来るので、並べ替えのときにも優先されます。
+- 送りありの読みは、まだ並べ替えません。
+- zenz が応答しないときや時間切れのときは、辞書の順のまま候補を出します。
+
+同じ読みの候補が複数ある語で試すと、先頭の候補の正解率は 89.4% から 98.6% に上がりました（作者のブログ記事で評価）。
+並べ替えにかかる時間は、候補 20 個で約 40 ms です。
+
 ### 設定項目
 
 | 変数 | 既定値 | 意味 |
@@ -71,6 +96,12 @@ skk-zenz をこのディレクトリから読み込むと、サーバとモデ�
 | `skk-zenz-timeout` | `1.0` | 変換結果を待つ秒数。 |
 | `skk-zenz-server-args` | `nil` | サーバに渡す追加の引数。例: `("--threads" "8")` |
 | `skk-zenz-reading-regexp` | ひらがな・ー・、。・！？ | zenz に送る読みを表す正規表現。 |
+| `skk-zenz-rerank` | `nil` | `t` なら、`skk-zenz-mode` が辞書の候補を zenz で並べ替える。設定はモードの有効化より前に行う。 |
+| `skk-zenz-rerank-method` | `promote` | 並べ替えの方法。`promote` または `mix`。 |
+| `skk-zenz-rerank-threshold` | `1.0` | `promote` で候補を先頭へ移すための、スコアの差（対数確率）の下限。大きくすると先頭が変わりにくくなる。 |
+| `skk-zenz-rerank-weight` | `1.0` | `mix` で、辞書での順位をどれだけ重視するか。 |
+| `skk-zenz-rerank-limit` | `20` | zenz で採点する、先頭からの候補の数。 |
+| `skk-zenz-rerank-timeout` | `0.3` | 採点を待つ秒数。過ぎたら辞書の順のまま出す。 |
 
 最近の x86_64 CPU で 4 スレッドを使う場合、変換にかかる時間は短い読みで約 20 ms、20 文字程度の読みで 60〜130 ms です。
 候補の数を増やすほど時間がかかります。
@@ -92,7 +123,8 @@ make test
 モデルが必要なテストは、モデルファイルがあるときだけ実行し、ないときはスキップします。
 モデルファイルは `models/zenz-v3.2-small-Q5_K_M.gguf`、または `ZENZ_MODEL` が指すファイルです。
 
-サーバの応答時間は `scripts/bench_server.py` で計測できます。設計は
+サーバの応答時間は `scripts/bench_server.py` で計測できます。
+候補の並べ替えの効果は `scripts/eval_rerank.py` で評価できます（使い方はスクリプトの先頭を参照、`uv` が必要）。設計は
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、今後の計画は [docs/ROADMAP.md](docs/ROADMAP.md) にあります（どちらも英語）。
 
 ## ライセンス

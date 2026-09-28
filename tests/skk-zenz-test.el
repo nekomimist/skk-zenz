@@ -194,6 +194,82 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
     (should skk-zenz--last-failure)
     (should-not skk-zenz--ready)))
 
+;;; Reranking
+
+(ert-deftest skk-zenz-test-rerank-words-promote ()
+  (let* ((skk-zenz-rerank-method 'promote)
+         (skk-zenz-rerank-threshold 2.0)
+         (a "A") (b "B") (c "C") (lisp "(lisp)")
+         (words (list a b c lisp)))
+    ;; B beats A by more than the threshold: only B moves.
+    (should (equal (skk-zenz--rerank-words words `((,a . -5.0) (,b . -1.0) (,c . -2.0)))
+                   '("B" "A" "C" "(lisp)")))
+    ;; Within the threshold, dictionary order is kept.
+    (should (eq (skk-zenz--rerank-words words `((,a . -2.5) (,b . -1.0) (,c . -2.0)))
+                words))
+    ;; An unscored first candidate is never displaced.
+    (should (eq (skk-zenz--rerank-words words `((,b . -1.0) (,c . -9.0))) words))))
+
+(ert-deftest skk-zenz-test-rerank-words-mix ()
+  (let* ((skk-zenz-rerank-method 'mix)
+         (skk-zenz-rerank-weight 1.0)
+         (a "A") (lisp "(lisp)") (b "B") (c "C")
+         (words (list a lisp b c)))
+    ;; Unscored words stay in their slots; the others sort by
+    ;; score - log(1 + rank): A -3, B -1-log(3), C -0.5-log(4).
+    (should (equal (skk-zenz--rerank-words words `((,a . -3.0) (,b . -1.0) (,c . -0.5)))
+                   '("C" "(lisp)" "B" "A")))
+    ;; The rank penalty keeps close calls in dictionary order.
+    (should (equal (skk-zenz--rerank-words words `((,a . -1.0) (,b . -0.5) (,c . -0.9)))
+                   words))))
+
+(ert-deftest skk-zenz-test-rerank-search ()
+  (skk-zenz-test--with-server nil
+    (skk-zenz-test--with-henkan "▼かな" "かな"
+      (let ((skk-zenz-rerank-method 'promote)
+            (skk-zenz-rerank-threshold 2.0)
+            (skk-zenz-rerank-timeout 3.0))
+        ;; Programs are merged in order without duplicates, then 乙9 is
+        ;; promoted over 甲1.
+        (should (equal (skk-zenz-rerank-search '('("甲1" "乙9;注釈") '("甲1" "丙5")))
+                       '("乙9;注釈" "甲1" "丙5")))
+        ;; A margin at or below the threshold keeps dictionary order.
+        (should (equal (skk-zenz-rerank-search '('("甲1" "乙3")))
+                       '("甲1" "乙3")))
+        ;; Only the first `skk-zenz-rerank-limit' candidates are scored.
+        (let ((skk-zenz-rerank-limit 2))
+          (should (equal (skk-zenz-rerank-search '('("甲1" "乙2" "丙9")))
+                         '("甲1" "乙2" "丙9"))))
+        ;; A single candidate needs no scoring.
+        (should (equal (skk-zenz-rerank-search '('("甲1") nil)) '("甲1")))))))
+
+(ert-deftest skk-zenz-test-rerank-sends-context-and-texts ()
+  (let ((log (make-temp-file "skk-zenz-log")))
+    (unwind-protect
+        (skk-zenz-test--with-server (list (concat "FAKE_ZENZ_LOG=" log))
+          (skk-zenz-test--with-henkan "左▼かな" "かな"
+            (let ((skk-zenz-rerank-timeout 3.0))
+              (skk-zenz-rerank-search
+               '('("甲;注釈" "甲" "(concat \"x\")" "乙")))))
+          (with-temp-buffer
+            (let ((coding-system-for-read 'utf-8-unix))
+              (insert-file-contents log))
+            ;; Annotations are removed, duplicates and Lisp forms dropped.
+            (should (equal (buffer-string) "かな|左|甲|乙\n"))))
+      (delete-file log))))
+
+(ert-deftest skk-zenz-test-rerank-failures-keep-dictionary-order ()
+  (skk-zenz-test--with-server nil
+    (let ((skk-zenz-rerank-timeout 0.2)
+          (words '("甲1" "乙9")))
+      ;; Timeout, error response, and ineligible readings.
+      (dolist (key '("おそい" "えらー" "abc"))
+        (skk-zenz-test--with-henkan (concat "▼" key) key
+          (should (equal (skk-zenz-rerank-search `(',words)) words))))
+      (skk-zenz-test--with-henkan "▼かな" "かな"
+        (let ((skk-okuri-char "k"))
+          (should (equal (skk-zenz-rerank-search `(',words)) words)))))))
+
 ;;; Learning exclusion
 
 (ert-deftest skk-zenz-test-learning ()
@@ -256,6 +332,38 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
                       skk-search-excluding-word-pattern-function))
     (should-not (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))))
 
+(ert-deftest skk-zenz-test-mode-wraps-dictionaries ()
+  (let* ((jisyo '(skk-search-jisyo-file skk-jisyo 0 t))
+         (large '(skk-search-jisyo-file skk-large-jisyo 10000))
+         (server '(skk-search-server skk-aux-large-jisyo 10000))
+         (original (list '(skk-search-kakutei-jisyo-file skk-kakutei-jisyo 10000 t)
+                         jisyo large server '(skk-search-katakana-maybe) jisyo))
+         (skk-search-prog-list original)
+         (skk-search-excluding-word-pattern-function nil)
+         (skk-zenz-rerank t)
+         (skk-zenz-mode nil))
+    (skk-zenz-mode 1)
+    (unwind-protect
+        (progn
+          ;; Only the first run of dictionary programs is merged.
+          (should (equal skk-search-prog-list
+                         (list skk-zenz--long-form
+                               '(skk-search-kakutei-jisyo-file skk-kakutei-jisyo 10000 t)
+                               `(skk-zenz-rerank-search '(,jisyo ,large ,server))
+                               '(skk-search-katakana-maybe)
+                               jisyo
+                               skk-zenz--fallback-form)))
+          (skk-zenz-mode 1)
+          (should (= (length skk-search-prog-list) 6)))
+      (skk-zenz-mode -1))
+    (should (equal skk-search-prog-list original))
+    ;; Without `skk-zenz-rerank', dictionaries are left alone.
+    (let ((skk-zenz-rerank nil))
+      (skk-zenz-mode 1)
+      (unwind-protect
+          (should (member jisyo skk-search-prog-list))
+        (skk-zenz-mode -1)))))
+
 ;;; SKK integration
 
 (defun skk-zenz-test--type (prefix keys)
@@ -288,7 +396,8 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
          (skk-show-tooltip nil)
          (skk-egg-like-newline t))
     (with-temp-file skk-large-jisyo
-      (insert ";; okuri-ari entries.\n;; okuri-nasi entries.\nきしゃ /汽車/\n"))
+      (insert ";; okuri-ari entries.\n;; okuri-nasi entries.\n"
+              "かいとう /回答1/解答9/\nきしゃ /汽車/\n"))
     ;; DDSKK pauses to announce files it creates, so create them up front.
     (dolist (file (list skk-jisyo skk-record-file))
       (write-region "" nil file))
@@ -318,9 +427,20 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                            "きょうはいいてんきですね-1;zenz"))
             ;; Dictionary and fallback words were learned, without the zenz
             ;; annotation; the long-reading word was not.
+            ;; Reranking merges the dictionaries and promotes 解答9.
+            (let ((skk-search-prog-list
+                   (list `(skk-zenz-rerank-search
+                           '((skk-search-jisyo-file skk-jisyo 0 t)
+                             (skk-search-jisyo-file skk-large-jisyo 10000)))
+                         skk-zenz--fallback-form))
+                  (skk-zenz-rerank-method 'promote)
+                  (skk-zenz-rerank-timeout 3.0))
+              (should (equal (skk-zenz-test--type "" "K a i t o u SPC")
+                             '("解答9" ("解答9" "回答1")))))
             (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
                            (buffer-string))))
               (should (string-match-p "^きしゃ /きしゃ-1/汽車/$" jisyo))
+              (should (string-match-p "^かいとう /解答9/$" jisyo))
               (should (string-match-p "^ぶんみゃく /左|/$" jisyo))
               (should-not (string-match-p "zenz\\|てんき" jisyo)))))
       (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
@@ -344,6 +464,11 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                        "解答;zenz"))
         (should (equal (car (skk-zenz-test--search "かいとう" :fallback
                                                    "冷凍食品を電子レンジで▼かいとう"))
-                       "解凍;zenz"))))))
+                       "解凍;zenz"))
+        (skk-zenz-test--with-henkan "試験問題の▼かいとう" "かいとう"
+          (let ((skk-zenz-rerank-method 'promote)
+                (skk-zenz-rerank-timeout 3.0))
+            (should (equal (skk-zenz-rerank-search '('("回答" "解凍" "解答")))
+                           '("解答" "回答" "解凍")))))))))
 
 ;;; skk-zenz-test.el ends here

@@ -179,6 +179,41 @@ misinterpret: `;` starts an annotation, a string that looks like a Lisp form
 Kept candidates get the annotation `;zenz` (`skk-zenz-annotation`, nil for
 none).
 
+### Reranking dictionary candidates
+Enabled by `skk-zenz-rerank` (default nil). The evaluation behind the defaults
+is in `ROADMAP.md` (Phase 6).
+
+- `skk-search` stops at the first program that returns candidates, and
+  `skk-search-end-function` runs once per dictionary file. Reordering inside
+  either would only see one dictionary, often the personal one with a single
+  word. So `(skk-zenz-rerank-search PROGRAMS)` evaluates all PROGRAMS at once,
+  merges their candidates in order with `skk-nunion`, and reranks the merged
+  list.
+- When `skk-zenz-rerank` is non-nil, `skk-zenz-mode` replaces the first run
+  of consecutive entries whose function is in `skk-zenz-rerank-programs`
+  (dictionary searches) with one `skk-zenz-rerank-search` entry, and expands
+  it again when disabled. Entries before the run (such as the kakutei
+  dictionary) and after it (such as `skk-search-katakana-maybe`) are kept. If
+  the list already calls `skk-zenz-rerank-search`, the mode leaves it alone.
+- Only okuri-nashi readings that match `skk-zenz-reading-regexp` and have at
+  least two candidates are reranked. The first `skk-zenz-rerank-limit` (20)
+  candidates are scored with the `score` op, with the same context as
+  conversions. Annotations are removed before scoring; Lisp forms are not
+  scored and keep their positions.
+- `promote` (default): move zenz's best candidate to the front if its score
+  beats the first candidate's by more than `skk-zenz-rerank-threshold` (1.0);
+  everything else keeps dictionary order, so the positions of later
+  candidates stay familiar. `mix`: sort the scored candidates by
+  `score - skk-zenz-rerank-weight * log(1 + rank)`.
+- The dictionary order carries the user's history: the personal dictionary
+  comes first and puts the last confirmed word at its head. The rank term
+  (`mix`) and the threshold (`promote`) keep that prior when zenz is unsure,
+  which matters most without left context.
+- Scoring waits up to `skk-zenz-rerank-timeout` (0.3 s); on failure or
+  timeout, candidates are returned in dictionary order.
+- Learning is unchanged: reranked words come from dictionaries and are
+  learned as usual.
+
 ### Learning
 - Words confirmed from candidates for long readings (trigger a) are not
   learned. These are usually whole phrases that would clutter the personal

@@ -14,6 +14,11 @@
 ;;   しぬ      exits without answering
 ;;   ぶんみゃく returns "LEFT|RIGHT" as the only candidate
 ;;
+;; A score request gives each candidate the number it contains ("乙9"
+;; scores 9), or 0 if it contains none; the special readings above behave
+;; the same.  Score requests are logged to the file named by
+;; FAKE_ZENZ_LOG, if set, as "KANA|LEFT|CANDIDATE..." lines.
+;;
 ;; FAKE_ZENZ_PROTOCOL overrides the protocol version in the hello line.
 ;; FAKE_ZENZ_FAIL makes the server exit with an error before the hello.
 
@@ -33,6 +38,22 @@
     (_ (apply #'vector
               (mapcar (lambda (i) (format "%s-%d" kana i)) (number-sequence 1 n))))))
 
+(defun fake-zenz--scores (candidates)
+  "Return the score vector for CANDIDATES."
+  (apply #'vector
+         (mapcar (lambda (text)
+                   (if (string-match "[0-9]+" text)
+                       (float (string-to-number (match-string 0 text)))
+                     0.0))
+                 candidates)))
+
+(defun fake-zenz--log-score (kana left candidates)
+  "Append a line for a score request to $FAKE_ZENZ_LOG."
+  (when-let* ((file (getenv "FAKE_ZENZ_LOG")))
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region (concat (string-join (cons kana (cons left candidates)) "|") "\n")
+                    nil file t 'silent))))
+
 (when (getenv "FAKE_ZENZ_FAIL")
   (message "error: failed to load model: fake")
   (kill-emacs 1))
@@ -49,15 +70,21 @@
              (kana (alist-get 'kana request))
              (left (or (alist-get 'left request) ""))
              (right (or (alist-get 'right request) ""))
-             (n (or (alist-get 'n request) 1)))
+             (n (or (alist-get 'n request) 1))
+             (op (or (alist-get 'op request) "convert"))
+             (texts (append (alist-get 'candidates request) nil)))
         (pcase kana
           ("しぬ" (kill-emacs 3))
           ("えらー" (fake-zenz--print `((id . ,id) (error . "fake error"))))
           (_
            (when (equal kana "おそい")
              (sleep-for 1))
-           (fake-zenz--print
-            `((id . ,id) (candidates . ,(fake-zenz--candidates kana left right n))))))))
+           (if (equal op "score")
+               (progn
+                 (fake-zenz--log-score kana left texts)
+                 (fake-zenz--print `((id . ,id) (scores . ,(fake-zenz--scores texts)))))
+             (fake-zenz--print
+              `((id . ,id) (candidates . ,(fake-zenz--candidates kana left right n)))))))))
   (end-of-file nil))
 
 ;;; fake-zenz-server.el ends here

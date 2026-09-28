@@ -88,7 +88,7 @@ context, like Zenzai's candidate evaluation. Design: `ARCHITECTURE.md`.
 
 - [x] `score` op in zenz-server (teacher forcing, shared prompt KV cache).
 - [x] Offline evaluation (`scripts/eval_rerank.py`).
-- [ ] Client: a search program that merges dictionary programs and reranks.
+- [x] Client: a search program that merges dictionary programs and reranks.
 - [ ] Okuri-ari readings (stem + okurigana is scored as one text).
 
 Findings (2026-09-28, 12 blog posts from 2023 to 2026 by the user, 1376
@@ -110,6 +110,9 @@ scored):
 - Scoring cost grows with the candidate count: for こう (234 candidates), 10 /
   20 / 64 candidates take 30 / 37 / 78 ms. Scoring more than 20 did not
   change the result; 10 lost about 0.3 points.
+- `promote` uses θ=1 rather than 2: with θ=2, 解答 (−0.14) did not replace
+  回答 (−2.07) after 試験問題の. θ=1 scores 0.986 (8 broken) with context
+  and 0.933 without.
 - Broken cases are mostly equally valid variants (稼動 → 稼働) or rare words
   (逃避 → 頭皮, 代替 → 大体).
 - Caveats: the corpus is small and single-author, the evaluator's

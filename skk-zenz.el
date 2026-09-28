@@ -28,12 +28,17 @@
 ;;
 ;; Words confirmed from zenz candidates for long readings are not added
 ;; to the personal dictionary; words from fallback candidates are learned
-;; as usual (see `skk-zenz-learn-fallback').  See docs/ARCHITECTURE.md
-;; for the design.
+;; as usual (see `skk-zenz-learn-fallback').
+;;
+;; With `skk-zenz-rerank' set, the mode also merges the dictionary
+;; programs into one `skk-zenz-rerank-search' entry, which reorders
+;; dictionary candidates by how well zenz thinks they fit the context.
+;; See docs/ARCHITECTURE.md for the design.
 
 ;;; Code:
 
 (require 'skk)
+(require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 
@@ -107,6 +112,50 @@ Words confirmed from candidates for long readings (see
 `skk-zenz-min-length') are never learned."
   :type 'boolean)
 
+(defcustom skk-zenz-rerank nil
+  "If non-nil, `skk-zenz-mode' reranks dictionary candidates with zenz.
+Enabling the mode then replaces the first run of dictionary programs in
+`skk-search-prog-list' (see `skk-zenz-rerank-programs') with one
+`skk-zenz-rerank-search' entry, and disabling it restores them.  Set this
+before enabling the mode."
+  :type 'boolean)
+
+(defcustom skk-zenz-rerank-programs
+  '(skk-search-jisyo-file skk-search-cdb-jisyo skk-search-server
+    skk-okuri-search skk-search-extra-jisyo-files)
+  "Search functions whose entries `skk-zenz-rerank' merges and reranks."
+  :type '(repeat function))
+
+(defcustom skk-zenz-rerank-method 'promote
+  "How zenz scores reorder dictionary candidates.
+`promote' moves the candidate zenz likes best to the front when its score
+beats that of the first candidate by more than
+`skk-zenz-rerank-threshold'; the other candidates keep their order.
+`mix' sorts candidates by zenz score minus `skk-zenz-rerank-weight' times
+log(1 + dictionary rank)."
+  :type '(choice (const :tag "Promote the best candidate" promote)
+                 (const :tag "Sort by score and rank" mix)))
+
+(defcustom skk-zenz-rerank-threshold 1.0
+  "Log-probability margin needed to promote a candidate.
+Used when `skk-zenz-rerank-method' is `promote'.  Larger values change
+the first candidate less often."
+  :type 'number)
+
+(defcustom skk-zenz-rerank-weight 1.0
+  "Weight of the dictionary rank when `skk-zenz-rerank-method' is `mix'.
+Larger values keep candidates closer to dictionary order."
+  :type 'number)
+
+(defcustom skk-zenz-rerank-limit 20
+  "Number of leading dictionary candidates that zenz scores.
+Later candidates keep their positions."
+  :type 'natnum)
+
+(defcustom skk-zenz-rerank-timeout 0.3
+  "Seconds to wait for scores before keeping dictionary order."
+  :type 'number)
+
 (defcustom skk-zenz-timeout 1.0
   "Seconds to wait for a conversion before giving up."
   :type 'number)
@@ -147,6 +196,9 @@ Used to decide whether a confirmed word is learned.")
 
 (defconst skk-zenz--fallback-form '(skk-zenz-search :fallback)
   "Entry `skk-zenz-mode' adds to the tail of `skk-search-prog-list'.")
+
+(defvar skk-zenz--rerank-form nil
+  "The `skk-zenz-rerank-search' entry `skk-zenz-mode' added, or nil.")
 
 (defun skk-zenz--log (format-string &rest args)
   "Log FORMAT-STRING with ARGS when `skk-zenz-debug' is non-nil."
@@ -311,14 +363,16 @@ decode it so the process coding system encodes it exactly once."
         json
       (decode-coding-string json 'utf-8))))
 
-(defun skk-zenz--request (kana left right n)
-  "Ask the server for N candidates for KANA with LEFT and RIGHT context.
-Return a list of strings, or nil on failure or timeout."
+;; `skk-zenz--call' clears responses it did not ask for, so callers must
+;; not nest requests.
+(defun skk-zenz--call (request timeout)
+  "Send REQUEST to the server and wait up to TIMEOUT seconds for the reply.
+REQUEST is an alist of request fields other than `id'.  Return the
+response as an alist, or nil on failure, timeout, or an error response."
   (when-let* ((proc (skk-zenz--ensure-process)))
     (let* ((id (setq skk-zenz--next-id (1+ skk-zenz--next-id)))
-           (line (skk-zenz--json-encode
-                  `((id . ,id) (kana . ,kana) (left . ,left) (right . ,right) (n . ,n))))
-           (deadline (+ (float-time) skk-zenz-timeout))
+           (line (skk-zenz--json-encode (cons (cons 'id id) request)))
+           (deadline (+ (float-time) timeout))
            response)
       (skk-zenz--log "-> %s" line)
       (process-send-string proc (concat line "\n"))
@@ -330,13 +384,33 @@ Return a list of strings, or nil on failure or timeout."
       (clrhash skk-zenz--responses)
       (cond
        ((null response)
-        (skk-zenz--log "no response for %S within %ss" kana skk-zenz-timeout)
+        (skk-zenz--log "no response for %S within %ss" (alist-get 'kana request) timeout)
         nil)
        ((alist-get 'error response)
         (message "skk-zenz: %s" (alist-get 'error response))
         nil)
-       (t
-        (seq-filter #'stringp (alist-get 'candidates response)))))))
+       (t response)))))
+
+(defun skk-zenz--request (kana left right n)
+  "Ask the server for N candidates for KANA with LEFT and RIGHT context.
+Return a list of strings, or nil on failure or timeout."
+  (when-let* ((response (skk-zenz--call
+                         `((kana . ,kana) (left . ,left) (right . ,right) (n . ,n))
+                         skk-zenz-timeout)))
+    (seq-filter #'stringp (alist-get 'candidates response))))
+
+(defun skk-zenz--score (kana left right texts)
+  "Return zenz scores of TEXTS as conversions of KANA in context.
+LEFT and RIGHT are the context.  The result lists one log-probability per
+text, in order, or is nil on failure or timeout."
+  (when-let* ((response (skk-zenz--call
+                         `((op . "score") (kana . ,kana) (left . ,left) (right . ,right)
+                           (candidates . ,(vconcat texts)))
+                         skk-zenz-rerank-timeout))
+              (scores (alist-get 'scores response)))
+    (when (= (length scores) (length texts))
+      ;; The server writes an infinite score as null.
+      (mapcar (lambda (score) (if (numberp score) score -1.0e+INF)) scores))))
 
 ;;; SKK integration
 
@@ -418,6 +492,138 @@ the entry at the tail."
             (mapcar (lambda (word) (concat word ";" skk-zenz-annotation)) words)
           words)))))
 
+;;; Reranking
+
+(defun skk-zenz--rerank-eligible-p (key)
+  "Return non-nil if dictionary candidates for reading KEY may be reranked."
+  (and (stringp key)
+       (null skk-okuri-char)
+       (string-match-p skk-zenz-reading-regexp key)))
+
+(defun skk-zenz--scorable-text (word)
+  "Return the text of dictionary candidate WORD to score, or nil.
+Annotations are removed.  Lisp forms, which SKK evaluates, are not scored."
+  (when (stringp word)
+    (let ((text (car (skk-treat-strip-note-from-word word))))
+      (unless (or (string-empty-p text)
+                  (skk-lisp-prog-p text)
+                  (string-match-p "\n" text))
+        text))))
+
+(defun skk-zenz--rerank-words (words scores)
+  "Return WORDS reordered by SCORES, following `skk-zenz-rerank-method'.
+SCORES is an alist of (WORD . SCORE); words without a score keep their
+positions."
+  (let ((score-of (lambda (word) (cdr (assq word scores)))))
+    (pcase skk-zenz-rerank-method
+      ('mix
+       (let* ((vec (vconcat words))
+              (slots (seq-filter (lambda (i) (funcall score-of (aref vec i)))
+                                 (number-sequence 0 (1- (length vec)))))
+              ;; `sort' is stable, so ties keep dictionary order.
+              (ranked (sort (mapcar (lambda (i)
+                                      (cons (- (funcall score-of (aref vec i))
+                                               (* skk-zenz-rerank-weight (log (1+ i))))
+                                            (aref vec i)))
+                                    slots)
+                            (lambda (a b) (> (car a) (car b))))))
+         (cl-loop for slot in slots
+                  for entry in ranked
+                  do (aset vec slot (cdr entry)))
+         (append vec nil)))
+      (_
+       (let ((first-score (funcall score-of (car words)))
+             best best-score)
+         (dolist (word words)
+           (let ((score (funcall score-of word)))
+             (when (and score (or (null best-score) (> score best-score)))
+               (setq best word
+                     best-score score))))
+         (if (and first-score
+                  (not (eq best (car words)))
+                  (> (- best-score first-score) skk-zenz-rerank-threshold))
+             (cons best (seq-remove (lambda (word) (eq word best)) words))
+           words))))))
+
+(defun skk-zenz--rerank (key words)
+  "Return dictionary candidates WORDS for reading KEY reordered by zenz.
+Return WORDS unchanged if KEY is not eligible or scoring fails."
+  (if (not (and (cdr words) (skk-zenz--rerank-eligible-p key)))
+      words
+    (let ((texts nil)
+          (pairs nil))
+      ;; Score each distinct text once; WORDS may hold the same text with
+      ;; different annotations.
+      (dolist (word (seq-take words skk-zenz-rerank-limit))
+        (when-let* ((text (skk-zenz--scorable-text word)))
+          (unless (member text texts)
+            (push text texts))
+          (push (cons word text) pairs)))
+      (setq texts (nreverse texts))
+      (let ((scores (and (cdr texts)
+                         (skk-zenz--score key (skk-zenz--left-context)
+                                          (skk-zenz--right-context) texts))))
+        (if (null scores)
+            words
+          (let* ((by-text (cl-mapcar #'cons texts scores))
+                 (result (skk-zenz--rerank-words
+                          words
+                          (mapcar (lambda (pair)
+                                    (cons (car pair) (cdr (assoc (cdr pair) by-text))))
+                                  pairs))))
+            (unless (equal result words)
+              (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
+            result))))))
+
+;;;###autoload
+(defun skk-zenz-rerank-search (programs)
+  "Merge the candidates of search PROGRAMS and rerank them with zenz.
+PROGRAMS is a list of `skk-search-prog-list' entries, usually dictionary
+searches.  All of them are evaluated at once, their candidates merged in
+order without duplicates, and the result reordered by how well each
+candidate fits the context according to zenz (see
+`skk-zenz-rerank-method').  If zenz is unavailable, the merged candidates
+are returned in dictionary order."
+  (let (words)
+    (dolist (program programs)
+      ;; `skk-nunion' modifies its first argument; copy what programs return.
+      (setq words (skk-nunion words (copy-sequence (eval program)))))
+    (skk-zenz--rerank skk-henkan-key words)))
+
+(defun skk-zenz--dictionary-form-p (form)
+  "Return non-nil if search program FORM calls one of `skk-zenz-rerank-programs'."
+  (memq (car-safe form) skk-zenz-rerank-programs))
+
+(defun skk-zenz--wrap-dictionaries (programs)
+  "Return PROGRAMS with the first run of dictionary programs merged.
+The run is replaced by one `skk-zenz-rerank-search' entry, which is also
+stored in `skk-zenz--rerank-form'.  Return PROGRAMS unchanged if it has
+no dictionary program or already calls `skk-zenz-rerank-search'."
+  (let ((start (cl-position-if #'skk-zenz--dictionary-form-p programs)))
+    (if (or (null start)
+            (seq-some (lambda (form) (eq (car-safe form) 'skk-zenz-rerank-search))
+                      programs))
+        programs
+      (let ((end (or (cl-position-if-not #'skk-zenz--dictionary-form-p programs
+                                         :start start)
+                     (length programs))))
+        (setq skk-zenz--rerank-form
+              `(skk-zenz-rerank-search ',(seq-subseq programs start end)))
+        (append (seq-take programs start)
+                (list skk-zenz--rerank-form)
+                (seq-drop programs end))))))
+
+(defun skk-zenz--unwrap-dictionaries (programs)
+  "Return PROGRAMS with the entry in `skk-zenz--rerank-form' expanded again."
+  (prog1 (mapcan (lambda (form)
+                   (if (eq form skk-zenz--rerank-form)
+                       (copy-sequence (cadr (cadr form)))
+                     (list form)))
+                 programs)
+    (setq skk-zenz--rerank-form nil)))
+
+;;; Learning
+
 (defun skk-zenz--word-trigger (word)
   "Return the trigger (:long or :fallback) if confirmed WORD came from zenz.
 WORD may carry an annotation.  Return nil for words from elsewhere."
@@ -452,7 +658,9 @@ personal dictionary."
 (define-minor-mode skk-zenz-mode
   "Toggle zenz candidates in DDSKK conversion.
 When enabled, long readings are converted by zenz first, and other
-readings get zenz candidates after the dictionary candidates."
+readings get zenz candidates after the dictionary candidates.  If
+`skk-zenz-rerank' is non-nil, dictionary candidates are also reordered
+by zenz."
   :global t
   :group 'skk-zenz
   (if skk-zenz-mode
@@ -462,13 +670,16 @@ readings get zenz candidates after the dictionary candidates."
         (unless (member skk-zenz--fallback-form skk-search-prog-list)
           (setq skk-search-prog-list
                 (append skk-search-prog-list (list skk-zenz--fallback-form))))
+        (when skk-zenz-rerank
+          (setq skk-search-prog-list (skk-zenz--wrap-dictionaries skk-search-prog-list)))
         (add-hook 'skk-search-excluding-word-pattern-function
                   #'skk-zenz--exclude-word-p)
         (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation))
     (setq skk-search-prog-list
-          (seq-remove (lambda (form)
-                        (member form (list skk-zenz--long-form skk-zenz--fallback-form)))
-                      skk-search-prog-list))
+          (skk-zenz--unwrap-dictionaries
+           (seq-remove (lambda (form)
+                         (member form (list skk-zenz--long-form skk-zenz--fallback-form)))
+                       skk-search-prog-list)))
     (remove-hook 'skk-search-excluding-word-pattern-function
                  #'skk-zenz--exclude-word-p)
     (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
