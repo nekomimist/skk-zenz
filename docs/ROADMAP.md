@@ -82,12 +82,44 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 - [ ] Context length, beam width, `skk-zenz-min-length`, timeout.
 - [ ] Compare quality against the earlier Sumibi setup.
 
+## Phase 6: Rerank dictionary candidates
+Score SKK dictionary candidates with zenz (the `score` op) and reorder them by
+context, like Zenzai's candidate evaluation. Design: `ARCHITECTURE.md`.
+
+- [x] `score` op in zenz-server (teacher forcing, shared prompt KV cache).
+- [x] Offline evaluation (`scripts/eval_rerank.py`).
+- [ ] Client: a search program that merges dictionary programs and reranks.
+- [ ] Okuri-ari readings (stem + okurigana is scored as one text).
+
+Findings (2026-09-28, 12 blog posts from 2023 to 2026 by the user, 1376
+instances where the written form is one of two or more dictionary
+candidates; personal dictionary followed by SKK-JISYO.L; top 20 candidates
+scored):
+
+| Order | Top-1 with left context | Top-1 without context |
+|---|---|---|
+| Dictionary order | 0.894 | 0.894 |
+| zenz score only | 0.982 (139 fixed, 18 broken) | 0.914 (98 fixed, 71 broken) |
+| zenz − β·log(1+rank), β=1 | 0.988 (137 fixed, 7 broken) | 0.924 |
+| Promote zenz's best if it wins by > θ=2 | 0.984 (128 fixed, 4 broken) | 0.941 (82 fixed, 17 broken) |
+
+- The left context does most of the work. Without it, zenz alone breaks
+  almost as many conversions as it fixes; the dictionary prior is needed.
+- Okuri-ari instances (408 of them) gain as much as okuri-nashi ones
+  (0.953 → 0.993 with β=1).
+- Scoring cost grows with the candidate count: for こう (234 candidates), 10 /
+  20 / 64 candidates take 30 / 37 / 78 ms. Scoring more than 20 did not
+  change the result; 10 lost about 0.3 points.
+- Broken cases are mostly equally valid variants (稼動 → 稼働) or rare words
+  (逃避 → 頭皮, 代替 → 大体).
+- Caveats: the corpus is small and single-author, the evaluator's
+  segmentation turns some okuri-ari words into okuri-nashi entries (かき →
+  書き), and the texts may overlap with the model's training data.
+
 ## Later
 - Linux ARM64 support.
 - Okuri-ari conversion.
 - Asynchronous prefetch while typing in ▽ mode.
-- Rerank SKK dictionary candidates by zenz likelihood (Zenzai-style candidate
-  evaluation).
 - v3 condition tags (profile, topic, style).
 
 ## Open Questions
