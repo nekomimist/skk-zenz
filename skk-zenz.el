@@ -94,6 +94,15 @@ context is the text after it, up to the end of the line.  Zero disables
 context."
   :type 'natnum)
 
+(defcustom skk-zenz-context-skip-non-japanese t
+  "If non-nil, the left context skips lines without Japanese.
+The line holding the conversion target is always used.  Earlier lines are
+taken only if they contain kana or kanji, so code between paragraphs, such
+as an Org source block, gives way to the text above it.  At most
+`skk-zenz--context-max-lines' earlier lines are examined.  If nil, the left
+context is simply the characters before the target."
+  :type 'boolean)
+
 (defcustom skk-zenz-reading-regexp "\\`[ぁ-ゖゝゞー、。・！？]+\\'"
   "Regexp that a reading must match to be sent to zenz.
 Okuri-ari readings never match because they end with an ASCII letter, so
@@ -173,6 +182,13 @@ Later candidates keep their positions."
 (defcustom skk-zenz-debug nil
   "If non-nil, log protocol traffic and failures to *Messages*."
   :type 'boolean)
+
+(defconst skk-zenz--context-max-lines 20
+  "Earlier lines examined for the left context.
+Used when `skk-zenz-context-skip-non-japanese' is non-nil.")
+
+(defconst skk-zenz--japanese-regexp "[ぁ-ゖァ-ヺ一-鿿々]"
+  "Regexp matching a kana or kanji character.")
 
 (defvar skk-zenz--process nil
   "The `zenz-server' process, or nil.")
@@ -428,8 +444,31 @@ text, in order, or is nil on failure or timeout."
     (if (or (null start) (<= skk-zenz-context-length 0))
         ""
       (let ((end (if (memq (char-before start) '(?▽ ?▼)) (1- start) start)))
-        (buffer-substring-no-properties
-         (max (point-min) (- end skk-zenz-context-length)) end)))))
+        (if skk-zenz-context-skip-non-japanese
+            (skk-zenz--japanese-left-context end)
+          (buffer-substring-no-properties
+           (max (point-min) (- end skk-zenz-context-length)) end))))))
+
+(defun skk-zenz--japanese-left-context (end)
+  "Return the left context ending at END, skipping lines without Japanese.
+The text from the beginning of END's line to END is always used.  Earlier
+lines are prepended while they fit, but only those containing kana or
+kanji; at most `skk-zenz--context-max-lines' of them are examined.  The
+result holds at most `skk-zenz-context-length' characters."
+  (save-excursion
+    (goto-char end)
+    (let ((text (buffer-substring-no-properties (line-beginning-position) end))
+          (examined 0))
+      (forward-line 0)
+      (while (and (< (length text) skk-zenz-context-length)
+                  (< examined skk-zenz--context-max-lines)
+                  (not (bobp)))
+        (forward-line -1)
+        (setq examined (1+ examined))
+        (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+          (when (string-match-p skk-zenz--japanese-regexp line)
+            (setq text (concat line "\n" text)))))
+      (substring text (max 0 (- (length text) skk-zenz-context-length))))))
 
 (defun skk-zenz--right-context (&optional skip)
   "Return the text after the conversion target, up to the end of the line.

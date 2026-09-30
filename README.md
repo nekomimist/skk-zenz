@@ -91,6 +91,7 @@ skk-zenz をこのディレクトリから読み込むと、サーバとモデ�
 | `skk-zenz-long-candidates` | `3` | 長い読みで zenz に求める候補の数。 |
 | `skk-zenz-fallback-candidates` | `5` | 辞書の候補のあとに zenz に求める候補の数。 |
 | `skk-zenz-context-length` | `40` | 文脈として前後それぞれに送る最大文字数。`0` にすると文脈を送らない。 |
+| `skk-zenz-context-skip-non-japanese` | `t` | 左の文脈を集めるとき、かなや漢字を含まない行（コードなど）を飛ばし、さらに上の行から拾う。変換する行は常に使う。`nil` にすると、変換位置の直前の文字をそのまま送る。 |
 | `skk-zenz-annotation` | `"zenz"` | zenz の候補に付ける注釈。`nil` にすると注釈を付けない。 |
 | `skk-zenz-learn-fallback` | `t` | 辞書の候補のあとに出した zenz の候補を確定したとき、個人辞書に学習するかどうか。 |
 | `skk-zenz-timeout` | `1.0` | 変換結果を待つ秒数。 |

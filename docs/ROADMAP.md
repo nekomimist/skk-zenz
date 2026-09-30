@@ -115,6 +115,20 @@ scored):
   and 0.933 without.
 - Okuri-ari with the real model: 手紙を → 書く, 絵を → 描く, but 注意を still
   prefers 書く (−0.57) over 欠く (−1.14).
+- Code in the left context (2026-09-30; four lines of elisp from the posts
+  followed by the text on the target's line, 40 characters in all):
+
+  | Left context | Rerank top-1 (promote, θ=1) | Greedy conversion top-1 |
+  |---|---|---|
+  | Prose lines above, as written | 0.986 | 0.927 |
+  | Code, then `;; ` and the target's line | 0.984 | 0.925 |
+  | Code, then the target's line | 0.982 | 0.922 |
+  | The target's line only | 0.984 | 0.910 |
+  | None | 0.933 | 0.723 |
+
+  Code costs at most half a point, and dropping it leaves a shorter context
+  that converts worse. Skipping lines without Japanese and reaching further
+  up for prose (`skk-zenz-context-skip-non-japanese`) aims at the first row.
 - Broken cases are mostly equally valid variants (稼動 → 稼働) or rare words
   (逃避 → 頭皮, 代替 → 大体).
 - Caveats: the corpus is small and single-author, the evaluator's

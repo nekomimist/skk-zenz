@@ -168,6 +168,14 @@ readings contain ASCII letters and never match.
 - Left context: up to `skk-zenz-context-length` (default 40) characters
   before `skk-henkan-start-point`, excluding the ▽/▼ marker just before it.
   It may span lines; the server removes newlines.
+- With `skk-zenz-context-skip-non-japanese` (default t), the text on the
+  target's line is always used, and earlier lines are prepended only if they
+  contain kana or kanji, looking at most 20 lines up. Code between
+  paragraphs (Org source blocks, code around Japanese comments) then gives
+  way to the Japanese text above it. Removing code without replacing it
+  would not help: code in the context costs little, while a shorter context
+  costs more (see `ROADMAP.md`, Phase 6). With nil, the left context is
+  simply the characters before the target.
 - Right context: up to the same number of characters after
   `skk-henkan-end-point` (or point), stopping at the end of the line, because
   text on following lines is often unrelated.

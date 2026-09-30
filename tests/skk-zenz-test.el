@@ -83,6 +83,28 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
       (should (equal (skk-zenz--left-context) ""))
       (should (equal (skk-zenz--right-context) "")))))
 
+(ert-deftest skk-zenz-test-context-skips-non-japanese-lines ()
+  (let ((text (concat "上の段落です。\n#+begin_src elisp\n(setq foo 1)\n#+end_src\n\n"
+                      ";; ▼かな")))
+    (skk-zenz-test--with-henkan text "かな"
+      (let ((skk-zenz-context-length 40)
+            (skk-zenz-context-skip-non-japanese t))
+        ;; Code and blank lines are skipped; the target's own line is kept.
+        (should (equal (skk-zenz--left-context) "上の段落です。\n;; "))
+        (let ((skk-zenz-context-length 5))
+          (should (equal (skk-zenz--left-context) "。\n;; ")))
+        (let ((skk-zenz-context-skip-non-japanese nil))
+          (should (equal (skk-zenz--left-context) "in_src elisp\n(setq foo 1)\n#+end_src\n\n;; ")))))
+    ;; Lines farther up than `skk-zenz--context-max-lines' are not examined.
+    (skk-zenz-test--with-henkan
+        (concat "遠い段落\n" (make-string skk-zenz--context-max-lines ?\n) "▼かな") "かな"
+      (let ((skk-zenz-context-skip-non-japanese t))
+        (should (equal (skk-zenz--left-context) ""))))
+    ;; Text on the target's line is used even without Japanese.
+    (skk-zenz-test--with-henkan "前の行\n(message \"▼かな" "かな"
+      (let ((skk-zenz-context-skip-non-japanese t))
+        (should (equal (skk-zenz--left-context) "前の行\n(message \""))))))
+
 (ert-deftest skk-zenz-test-context-at-buffer-edges ()
   (skk-zenz-test--with-henkan "▼かな" "かな"
     (should (equal (skk-zenz--left-context) ""))
