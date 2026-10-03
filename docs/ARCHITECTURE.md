@@ -182,7 +182,10 @@ readings contain ASCII letters and never match.
   text on following lines is often unrelated.
 
 ### Candidate filtering
-The client drops candidates that are empty, equal to the reading, already in
+The client first drops candidates whose score trails the best candidate's by
+more than `skk-zenz-max-score-gap` (default 8.0, nil to keep all); in the
+evaluation these were broken text, and no intended conversion trailed by
+more (`ROADMAP.md`, Phase 5). It then drops candidates that are empty, equal to the reading, already in
 `skk-henkan-list`, or duplicated. It also drops candidates that SKK would
 misinterpret: `;` starts an annotation, a string that looks like a Lisp form
 `(...)` would be evaluated, and newlines or U+FFFD indicate broken output.

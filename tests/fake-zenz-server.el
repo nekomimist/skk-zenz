@@ -6,13 +6,13 @@
 ;;
 ;; Speaks the zenz-server JSON Lines protocol without a model.  For a
 ;; request with reading KANA and N candidates it returns KANA-1 .. KANA-N,
-;; except for these readings:
+;; scored 0, -2, -4, and so on, except for these readings:
 ;;
-;;   ふぃるた  candidates that the client must filter out
+;;   ふぃるた  candidates that the client must filter out, all scored 0
 ;;   おそい    sleeps 1 second before answering
 ;;   えらー    returns an error response
 ;;   しぬ      exits without answering
-;;   ぶんみゃく returns "LEFT|RIGHT" as the only candidate
+;;   ぶんみゃく returns "LEFT|RIGHT" as the only candidate, scored 0
 ;;
 ;; A score request gives each candidate the number it contains ("乙9"
 ;; scores 9), or 0 if it contains none; the special readings above behave
@@ -37,6 +37,12 @@
     ("ぶんみゃく" (vector (format "%s|%s" left right)))
     (_ (apply #'vector
               (mapcar (lambda (i) (format "%s-%d" kana i)) (number-sequence 1 n))))))
+
+(defun fake-zenz--convert-scores (kana candidates)
+  "Return conversion scores for CANDIDATES of KANA."
+  (if (member kana '("ふぃるた" "ぶんみゃく"))
+      (make-vector (length candidates) 0.0)
+    (apply #'vector (number-sequence 0.0 (* -2.0 (1- (length candidates))) -2.0))))
 
 (defun fake-zenz--scores (candidates)
   "Return the score vector for CANDIDATES."
@@ -83,8 +89,10 @@
                (progn
                  (fake-zenz--log-score kana left texts)
                  (fake-zenz--print `((id . ,id) (scores . ,(fake-zenz--scores texts)))))
-             (fake-zenz--print
-              `((id . ,id) (candidates . ,(fake-zenz--candidates kana left right n)))))))))
+             (let ((candidates (fake-zenz--candidates kana left right n)))
+               (fake-zenz--print
+                `((id . ,id) (candidates . ,candidates)
+                  (scores . ,(fake-zenz--convert-scores kana candidates))))))))))
   (end-of-file nil))
 
 ;;; fake-zenz-server.el ends here

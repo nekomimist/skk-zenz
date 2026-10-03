@@ -85,7 +85,8 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 - [x] Keep `skk-zenz-min-length` (10) and `skk-zenz-timeout` (1.0 s).
 - [ ] Context length: keep 40, and let `skk-zenz-context-length` above 40
       take effect.
-- [ ] Drop candidates that trail the best by a large score gap.
+- [x] Drop candidates that trail the best by a large score gap
+      (`skk-zenz-max-score-gap`, 8.0).
 - [ ] Usage log (opt-in, local only) to check the offline findings against
       real input.
 - [ ] Compare quality against the earlier Sumibi setup.

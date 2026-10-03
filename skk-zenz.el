@@ -87,6 +87,12 @@ never consulted first."
   "Number of candidates to request after the dictionaries run out."
   :type 'natnum)
 
+(defcustom skk-zenz-max-score-gap 8.0
+  "Drop zenz candidates whose score trails the best by more than this.
+Scores are log-probabilities.  Candidates far behind the best are mostly
+broken text.  If nil, all candidates are kept."
+  :type '(choice (const :tag "Keep all" nil) number))
+
 (defcustom skk-zenz-context-length 40
   "Maximum number of characters of context to send on each side.
 The left context is the text before the conversion target.  The right
@@ -409,13 +415,30 @@ response as an alist, or nil on failure, timeout, or an error response."
         nil)
        (t response)))))
 
+(defun skk-zenz--drop-weak (candidates scores)
+  "Return CANDIDATES without those far behind the best one.
+SCORES are the log-probabilities of CANDIDATES, best first.  See
+`skk-zenz-max-score-gap'.  If SCORES do not match CANDIDATES, keep all."
+  (if (or (null skk-zenz-max-score-gap)
+          (/= (length candidates) (length scores))
+          (not (numberp (car scores))))
+      candidates
+    (let ((lowest (- (car scores) skk-zenz-max-score-gap)))
+      (cl-loop for candidate in candidates
+               for score in scores
+               ;; The server writes an infinite score as null.
+               when (and (numberp score) (>= score lowest))
+               collect candidate))))
+
 (defun skk-zenz--request (kana left right n)
   "Ask the server for N candidates for KANA with LEFT and RIGHT context.
 Return a list of strings, or nil on failure or timeout."
   (when-let* ((response (skk-zenz--call
                          `((kana . ,kana) (left . ,left) (right . ,right) (n . ,n))
                          skk-zenz-timeout)))
-    (seq-filter #'stringp (alist-get 'candidates response))))
+    (seq-filter #'stringp
+                (skk-zenz--drop-weak (alist-get 'candidates response)
+                                     (alist-get 'scores response)))))
 
 (defun skk-zenz--score (kana left right texts)
   "Return zenz scores of TEXTS as conversions of KANA in context.

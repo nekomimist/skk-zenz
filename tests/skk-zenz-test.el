@@ -144,6 +144,24 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
           (skk-zenz-fallback-candidates 2))
       (should (equal (skk-zenz-test--search "かな" :fallback) '("かな-1" "かな-2"))))))
 
+(ert-deftest skk-zenz-test-drop-weak ()
+  (let ((skk-zenz-max-score-gap 3))
+    (should (equal (skk-zenz--drop-weak '("a" "b" "c") '(-1.0 -4.0 -4.5)) '("a" "b")))
+    ;; Infinite scores arrive as nil.
+    (should (equal (skk-zenz--drop-weak '("a" "b") '(-1.0 nil)) '("a")))
+    ;; Missing or mismatched scores keep everything.
+    (should (equal (skk-zenz--drop-weak '("a" "b") nil) '("a" "b")))
+    (should (equal (skk-zenz--drop-weak '("a" "b") '(-1.0)) '("a" "b"))))
+  (let ((skk-zenz-max-score-gap nil))
+    (should (equal (skk-zenz--drop-weak '("a" "b") '(-1.0 -100.0)) '("a" "b")))))
+
+(ert-deftest skk-zenz-test-search-drops-weak-candidates ()
+  (skk-zenz-test--with-server nil
+    (let ((skk-zenz-annotation nil)
+          (skk-zenz-max-score-gap 3))
+      ;; The fake server scores かな-1 .. かな-5 as 0, -2, -4, -6, -8.
+      (should (equal (skk-zenz-test--search "かな" :fallback) '("かな-1" "かな-2"))))))
+
 (ert-deftest skk-zenz-test-search-long-reading ()
   (skk-zenz-test--with-server nil
     ;; Differs from `skk-zenz-fallback-candidates' to check which one is used.
