@@ -144,6 +144,16 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
           (skk-zenz-fallback-candidates 2))
       (should (equal (skk-zenz-test--search "かな" :fallback) '("かな-1" "かな-2"))))))
 
+(ert-deftest skk-zenz-test-command-max-context ()
+  (let ((skk-zenz-server-program "zenz-server")
+        (skk-zenz-server-args '("--threads" "8"))
+        (skk-zenz-model-file nil))
+    (let ((skk-zenz-context-length 40))
+      (should (equal (skk-zenz--command) '("zenz-server" "--threads" "8"))))
+    (let ((skk-zenz-context-length 80))
+      (should (equal (skk-zenz--command)
+                     '("zenz-server" "--max-context" "80" "--threads" "8"))))))
+
 (ert-deftest skk-zenz-test-drop-weak ()
   (let ((skk-zenz-max-score-gap 3))
     (should (equal (skk-zenz--drop-weak '("a" "b" "c") '(-1.0 -4.0 -4.5)) '("a" "b")))

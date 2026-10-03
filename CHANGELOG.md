@@ -14,4 +14,4 @@
 - `skk-zenz.el`: 左の文脈を集めるとき、かなや漢字を含まない行を飛ばし、その上の文章を使う（`skk-zenz-context-skip-non-japanese`）。Org の src ブロックやコードの中の日本語コメントで、文脈がコードで埋まらなくなる。
 - `scripts/eval_rerank.py`: 手元の文章と SKK 辞書を使って、並べ替えの効果を評価する。
 - `scripts/eval_convert.py`: 手元の文章や AJIMEE-Bench を使って、文脈の長さ、候補の数、読みの長さごとに変換の精度を評価する。
-- `zenz-server`: `--max-context` で、前後の文脈を何文字まで使うかを変えられる（既定は 40 文字）。
+- `zenz-server`: `--max-context` で、前後の文脈を何文字まで使うかを変えられる（既定は 40 文字）。`skk-zenz-context-length` が 40 より大きいときは、`skk-zenz.el` がこのオプションを渡す。

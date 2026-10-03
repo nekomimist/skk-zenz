@@ -48,7 +48,8 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
 - The model generates the converted text after U+EE01 until EOS.
 - The left context is truncated to its last 40 characters, the right context to
   its first 40 characters (azooKey defaults). `zenz-server --max-context C`
-  changes both limits, for evaluation.
+  changes both limits. The client passes it when `skk-zenz-context-length`
+  is above 40.
 - Omit the U+EE02 / U+EE07 sections when the corresponding context is empty.
 - Optional conditions: U+EE03 profile, U+EE04 topic, U+EE05 style, U+EE06
   preference (each up to 25 characters). Not used initially.

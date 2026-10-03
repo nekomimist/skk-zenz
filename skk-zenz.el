@@ -97,7 +97,9 @@ broken text.  If nil, all candidates are kept."
   "Maximum number of characters of context to send on each side.
 The left context is the text before the conversion target.  The right
 context is the text after it, up to the end of the line.  Zero disables
-context."
+context.  `zenz-server' keeps 40 characters by default; a larger value is
+passed to it with --max-context when it starts, so a change takes effect
+after `skk-zenz-restart'."
   :type 'natnum)
 
 (defcustom skk-zenz-context-skip-non-japanese t
@@ -245,9 +247,14 @@ Used to decide whether a confirmed word is learned.")
 
 ;;; Process management
 
+(defconst skk-zenz--server-context-length 40
+  "Characters of context that `zenz-server' keeps on each side by default.")
+
 (defun skk-zenz--command ()
   "Return the command line for `zenz-server'."
   (append (list skk-zenz-server-program)
+          (and (> skk-zenz-context-length skk-zenz--server-context-length)
+               (list "--max-context" (number-to-string skk-zenz-context-length)))
           skk-zenz-server-args
           (and skk-zenz-model-file
                (list "--model" (expand-file-name skk-zenz-model-file)))))

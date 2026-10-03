@@ -83,8 +83,8 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
       `zenz-server --max-context`).
 - [x] Candidates for long readings: `skk-zenz-long-candidates` 3 → 5.
 - [x] Keep `skk-zenz-min-length` (10) and `skk-zenz-timeout` (1.0 s).
-- [ ] Context length: keep 40, and let `skk-zenz-context-length` above 40
-      take effect.
+- [x] Context length: keep 40; a `skk-zenz-context-length` above 40 is
+      passed to the server with `--max-context`.
 - [x] Drop candidates that trail the best by a large score gap
       (`skk-zenz-max-score-gap`, 8.0).
 - [ ] Usage log (opt-in, local only) to check the offline findings against
@@ -110,8 +110,9 @@ Top-1 by left context length (n=5):
 
 - Ten characters give most of the gain. 80 adds about one point on blog
   phrases for 26 ms; AJIMEE contexts are shorter than 40, so it gains
-  nothing there. The server caps context at 40 by default, so a client
-  `skk-zenz-context-length` above 40 currently has no effect.
+  nothing there. The server capped context at 40, so a client
+  `skk-zenz-context-length` above 40 had no effect; the client now passes
+  `--max-context`.
 
 Candidate count (left context 40), for phrases of 10 or more kana:
 
