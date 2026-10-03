@@ -9,6 +9,7 @@
 - ビーム探索で複数の候補を出す。プロンプトの計算結果（KV キャッシュ）はビーム間で共有する。
 - `skk-zenz.el`: `skk-zenz-mode` で zenz を `skk-search-prog-list` に追加する。長い読みは辞書より先に、それ以外は辞書の候補のあとに zenz を使う。長い読みで確定した語は個人辞書に登録しない。それ以外の語は zenz の注釈を外して学習する（`skk-zenz-learn-fallback`）。
 - `skk-zenz.el`: zenz の候補のうち、1位とのスコアの差が大きいものを捨てる（`skk-zenz-max-score-gap`）。崩れた文字列が候補に出にくくなる。
+- `skk-zenz.el`: `skk-zenz-log-file` を設定すると、確定した変換ごとに使用ログを追記する。`scripts/usage_report.py` で集計できる。
 - `make model` でモデルをダウンロードし、SHA-256 を検証する。
 - `skk-zenz.el`: `skk-zenz-rerank` を有効にすると、辞書の候補を文脈に合わせて zenz で並べ替える（既定では無効）。`skk-zenz-mode` は辞書検索をまとめて `skk-zenz-rerank-search` に置き換え、モードを無効にすると元に戻す。送りありの読みも、語幹に送り仮名を付けた形で採点して並べ替える。
 - `skk-zenz.el`: 左の文脈を集めるとき、かなや漢字を含まない行を飛ばし、その上の文章を使う（`skk-zenz-context-skip-non-japanese`）。Org の src ブロックやコードの中の日本語コメントで、文脈がコードで埋まらなくなる。

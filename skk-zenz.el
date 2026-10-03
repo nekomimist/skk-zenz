@@ -187,6 +187,14 @@ Later candidates keep their positions."
   "Seconds to wait before starting `zenz-server' again after a failure."
   :type 'number)
 
+(defcustom skk-zenz-log-file nil
+  "File to append a usage record to on each confirmed conversion, or nil.
+Each record is one JSON line with the reading, the confirmed word, where
+the word came from, and the zenz candidates, ranks, and timings for the
+reading.  The context around the reading is not recorded.  Summarize the
+file with scripts/usage_report.py to tune the settings."
+  :type '(choice (const :tag "Off" nil) file))
+
 (defcustom skk-zenz-debug nil
   "If non-nil, log protocol traffic and failures to *Messages*."
   :type 'boolean)
@@ -216,6 +224,14 @@ Used when `skk-zenz-context-skip-non-japanese' is non-nil.")
 (defvar-local skk-zenz--candidates nil
   "Candidates zenz returned for the last reading, as (READING TRIGGER WORDS).
 Used to decide whether a confirmed word is learned.")
+
+(defvar skk-zenz--last-call nil
+  "Outcome of the last request, as (:status STATUS :ms MS).
+STATUS is `ok', `timeout', `error', or `unavailable'.")
+
+(defvar-local skk-zenz--usage nil
+  "Data about the conversion in progress, as (READING . PLIST).
+Collected for `skk-zenz-log-file' only.")
 
 (defconst skk-zenz--long-form '(skk-zenz-search :long)
   "Entry `skk-zenz-mode' adds to the head of `skk-search-prog-list'.")
@@ -400,10 +416,12 @@ decode it so the process coding system encodes it exactly once."
   "Send REQUEST to the server and wait up to TIMEOUT seconds for the reply.
 REQUEST is an alist of request fields other than `id'.  Return the
 response as an alist, or nil on failure, timeout, or an error response."
+  (setq skk-zenz--last-call (list :status 'unavailable :ms 0))
   (when-let* ((proc (skk-zenz--ensure-process)))
     (let* ((id (setq skk-zenz--next-id (1+ skk-zenz--next-id)))
            (line (skk-zenz--json-encode (cons (cons 'id id) request)))
-           (deadline (+ (float-time) timeout))
+           (start (float-time))
+           (deadline (+ start timeout))
            response)
       (skk-zenz--log "-> %s" line)
       (process-send-string proc (concat line "\n"))
@@ -413,6 +431,11 @@ response as an alist, or nil on failure, timeout, or an error response."
         (accept-process-output proc 0.01 nil t))
       ;; Requests are sequential, so anything else here is a late reply.
       (clrhash skk-zenz--responses)
+      (setq skk-zenz--last-call
+            (list :status (cond ((null response) 'timeout)
+                                ((alist-get 'error response) 'error)
+                                (t 'ok))
+                  :ms (round (* 1000 (- (float-time) start)))))
       (cond
        ((null response)
         (skk-zenz--log "no response for %S within %ss" (alist-get 'kana request) timeout)
@@ -443,9 +466,11 @@ Return a list of strings, or nil on failure or timeout."
   (when-let* ((response (skk-zenz--call
                          `((kana . ,kana) (left . ,left) (right . ,right) (n . ,n))
                          skk-zenz-timeout)))
-    (seq-filter #'stringp
-                (skk-zenz--drop-weak (alist-get 'candidates response)
-                                     (alist-get 'scores response)))))
+    (let* ((candidates (alist-get 'candidates response))
+           (kept (skk-zenz--drop-weak candidates (alist-get 'scores response))))
+      (setq skk-zenz--last-call
+            (plist-put skk-zenz--last-call :dropped (- (length candidates) (length kept))))
+      (seq-filter #'stringp kept))))
 
 (defun skk-zenz--score (kana left right texts)
   "Return zenz scores of TEXTS as conversions of KANA in context.
@@ -561,6 +586,8 @@ the entry at the tail."
                      (skk-zenz--request key (skk-zenz--left-context)
                                         (skk-zenz--right-context) n))))
         (setq skk-zenz--candidates (list key trigger words))
+        (skk-zenz--note key :zenz `(:trigger ,trigger :candidates ,words
+                                    ,@skk-zenz--last-call))
         (if skk-zenz-annotation
             (mapcar (lambda (word) (concat word ";" skk-zenz-annotation)) words)
           words)))))
@@ -648,23 +675,28 @@ Return WORDS unchanged if KEY is not eligible or scoring fails."
               (push text texts))
             (push (cons word text) pairs)))
         (setq texts (nreverse texts))
-        (let ((scores (and (cdr texts)
-                           ;; The okurigana follows the conversion target in
-                           ;; the buffer and is part of the scored text.
-                           (skk-zenz--score (car reading) (skk-zenz--left-context)
-                                            (skk-zenz--right-context (length okurigana))
-                                            texts))))
-          (if (null scores)
-              words
-            (let* ((by-text (cl-mapcar #'cons texts scores))
-                   (result (skk-zenz--rerank-words
+        (let* ((scores (and (cdr texts)
+                            ;; The okurigana follows the conversion target in
+                            ;; the buffer and is part of the scored text.
+                            (skk-zenz--score (car reading) (skk-zenz--left-context)
+                                             (skk-zenz--right-context (length okurigana))
+                                             texts)))
+               (result (if (null scores)
+                           words
+                         (let ((by-text (cl-mapcar #'cons texts scores)))
+                           (skk-zenz--rerank-words
                             words
                             (mapcar (lambda (pair)
                                       (cons (car pair) (cdr (assoc (cdr pair) by-text))))
-                                    pairs))))
-              (unless (equal result words)
-                (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
-              result))))
+                                    pairs))))))
+          (when (cdr texts)
+            (skk-zenz--note key :rerank
+                            `(:before ,(mapcar #'skk-zenz--word-text words)
+                              :after ,(mapcar #'skk-zenz--word-text result)
+                              ,@skk-zenz--last-call)))
+          (unless (equal result words)
+            (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
+          result))
     words))
 
 ;;;###autoload
@@ -746,6 +778,87 @@ personal dictionary."
         (cons (car (skk-treat-strip-note-from-word word)) (cdr args))
       args)))
 
+;;; Usage log
+
+(defun skk-zenz--word-text (word)
+  "Return candidate WORD without its annotation."
+  (if (stringp word) (car (skk-treat-strip-note-from-word word)) word))
+
+(defun skk-zenz--note (key property value)
+  "Record PROPERTY with VALUE for the conversion of reading KEY.
+Do nothing unless `skk-zenz-log-file' is non-nil."
+  (when skk-zenz-log-file
+    (unless (equal (car skk-zenz--usage) key)
+      (setq skk-zenz--usage (list key)))
+    (setcdr skk-zenz--usage (plist-put (cdr skk-zenz--usage) property value))))
+
+(defun skk-zenz--reset-usage (&rest _)
+  "Forget the usage data when a new conversion starts.
+Used as `:before' advice on `skk-henkan'."
+  (unless skk-henkan-list
+    (setq skk-zenz--usage nil)))
+
+(defun skk-zenz--note-registration (word)
+  "Record WORD registered in the minibuffer and return it.
+Used as `:filter-return' advice on `skk-henkan-in-minibuff'."
+  (when (stringp word)
+    (skk-zenz--note skk-henkan-key :registered word))
+  word)
+
+(defun skk-zenz--rank (word words)
+  "Return the position of WORD in WORDS, or :null."
+  (or (seq-position words word) :null))
+
+(defun skk-zenz--usage-record (word)
+  "Return the usage record for confirming WORD, as an alist for JSON."
+  (let* ((key skk-henkan-key)
+         (text (skk-zenz--word-text word))
+         (usage (and (equal (car skk-zenz--usage) key) (cdr skk-zenz--usage)))
+         (zenz (plist-get usage :zenz))
+         (rerank (plist-get usage :rerank))
+         (trigger (skk-zenz--word-trigger word)))
+    `((time . ,(format-time-string "%FT%T%z"))
+      (key . ,key)
+      (okurigana . ,(or skk-henkan-okurigana ""))
+      (word . ,text)
+      (index . ,skk-henkan-count)
+      (source . ,(cond ((equal text (plist-get usage :registered)) "registered")
+                       ((eq trigger :long) "zenz-long")
+                       (trigger "zenz-fallback")
+                       (t "dictionary")))
+      ,@(and zenz
+             `((zenz . ((trigger . ,(substring (symbol-name (plist-get zenz :trigger)) 1))
+                        (status . ,(symbol-name (plist-get zenz :status)))
+                        (ms . ,(plist-get zenz :ms))
+                        (dropped . ,(or (plist-get zenz :dropped) 0))
+                        (candidates . ,(vconcat (plist-get zenz :candidates)))
+                        (rank . ,(skk-zenz--rank text (plist-get zenz :candidates)))))))
+      ,@(and rerank
+             (let ((before (plist-get rerank :before))
+                   (after (plist-get rerank :after)))
+               `((rerank . ((status . ,(symbol-name (plist-get rerank :status)))
+                            (ms . ,(plist-get rerank :ms))
+                            (count . ,(length before))
+                            (top . ,(vconcat (seq-take after 5)))
+                            (rank-before . ,(skk-zenz--rank text before))
+                            (rank-after . ,(skk-zenz--rank text after))))))))))
+
+(defun skk-zenz--log-confirmation (&optional _arg word)
+  "Append a usage record to `skk-zenz-log-file' for the confirmed word.
+WORD is the word being confirmed, or nil for the current candidate.  Used
+as `:before' advice on `skk-kakutei'."
+  (when (and skk-zenz-log-file (eq skk-henkan-mode 'active))
+    (condition-case err
+        (let ((word (or word (skk-get-current-candidate 'noconv))))
+          (when (stringp word)
+            (let ((coding-system-for-write 'utf-8-unix))
+              (write-region (concat (skk-zenz--json-encode (skk-zenz--usage-record word))
+                                    "\n")
+                            nil skk-zenz-log-file t 'silent))))
+      (error
+       (message "skk-zenz: cannot write the usage log: %s" (error-message-string err))))
+    (setq skk-zenz--usage nil)))
+
 ;;;###autoload
 (define-minor-mode skk-zenz-mode
   "Toggle zenz candidates in DDSKK conversion.
@@ -766,7 +879,10 @@ by zenz."
           (setq skk-search-prog-list (skk-zenz--wrap-dictionaries skk-search-prog-list)))
         (add-hook 'skk-search-excluding-word-pattern-function
                   #'skk-zenz--exclude-word-p)
-        (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation))
+        (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
+        (advice-add 'skk-henkan :before #'skk-zenz--reset-usage)
+        (advice-add 'skk-henkan-in-minibuff :filter-return #'skk-zenz--note-registration)
+        (advice-add 'skk-kakutei :before #'skk-zenz--log-confirmation))
     (setq skk-search-prog-list
           (skk-zenz--unwrap-dictionaries
            (seq-remove (lambda (form)
@@ -775,6 +891,9 @@ by zenz."
     (remove-hook 'skk-search-excluding-word-pattern-function
                  #'skk-zenz--exclude-word-p)
     (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
+    (advice-remove 'skk-henkan #'skk-zenz--reset-usage)
+    (advice-remove 'skk-henkan-in-minibuff #'skk-zenz--note-registration)
+    (advice-remove 'skk-kakutei #'skk-zenz--log-confirmation)
     (skk-zenz-stop)))
 
 (provide 'skk-zenz)

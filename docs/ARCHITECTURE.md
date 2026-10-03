@@ -260,6 +260,32 @@ is in `ROADMAP.md` (Phase 6).
   annotation from zenz words first, so learned words do not show it when they
   later come from the dictionary. `skk-zenz-mode` adds and removes the advice.
 
+### Usage log
+`skk-zenz-log-file` (default nil) turns on a local log for tuning; nothing is
+sent anywhere. `scripts/usage_report.py` summarizes it.
+
+- A `:before` advice on `skk-kakutei` appends one JSON line per confirmation
+  in ▼ mode: time, `key`, `okurigana`, the confirmed `word` without
+  annotation, its `index` in `skk-henkan-list`, and its `source`
+  (`dictionary`, `zenz-long`, `zenz-fallback`, or `registered`).
+  `dictionary` covers every non-zenz search program.
+- If zenz converted the reading, `zenz` holds the trigger, the request
+  status (`ok`, `timeout`, `error`, `unavailable`), the round-trip time in
+  ms, the number of candidates dropped by `skk-zenz-max-score-gap`, the
+  candidates after filtering, and the confirmed word's rank among them
+  (null if absent).
+- If reranking scored the candidates, `rerank` holds the status, the time,
+  the number of candidates, the first five after reranking, and the
+  confirmed word's rank before and after.
+- The context is not recorded; readings and words are.
+- Data is collected per conversion in a buffer-local variable. A `:before`
+  advice on `skk-henkan` clears it when `skk-henkan-list` is empty (a new
+  conversion), and a `:filter-return` advice on `skk-henkan-in-minibuff`
+  notes a word registered in the minibuffer. `skk-zenz-mode` adds and
+  removes the advices; they do nothing while the log is off.
+- A failure to write the log is shown in the echo area and does not stop
+  the confirmation.
+
 ### Process management and failures
 - The server starts on the first zenz search and must send a compatible hello
   within `skk-zenz-startup-timeout` (5 s).

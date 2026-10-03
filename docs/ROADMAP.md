@@ -87,8 +87,11 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
       passed to the server with `--max-context`.
 - [x] Drop candidates that trail the best by a large score gap
       (`skk-zenz-max-score-gap`, 8.0).
-- [ ] Usage log (opt-in, local only) to check the offline findings against
-      real input.
+- [x] Usage log (opt-in, local only) to check the offline findings against
+      real input (`skk-zenz-log-file`, `scripts/usage_report.py`).
+- [ ] Review a few weeks of the usage log: reading lengths and sources
+      (`skk-zenz-min-length`), zenz ranks (candidate counts), rerank
+      fixed/broken counts, and timeouts.
 - [ ] Compare quality against the earlier Sumibi setup.
 
 Findings (2026-10-03, same machine as Phase 0, 4 threads). Corpora: the 12

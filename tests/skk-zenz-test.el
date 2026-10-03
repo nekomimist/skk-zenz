@@ -489,6 +489,43 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
             (list (buffer-string) henkan-list)))
       (kill-buffer buffer))))
 
+(defun skk-zenz-test--read-log (file)
+  "Return the usage records in FILE as alists."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (mapcar (lambda (line)
+              (json-parse-string line :object-type 'alist :array-type 'list
+                                 :null-object nil))
+            (split-string (buffer-string) "\n" t))))
+
+(defun skk-zenz-test--fields (record keys)
+  "Return the values of KEYS in usage RECORD."
+  (mapcar (lambda (key) (alist-get key record)) keys))
+
+(ert-deftest skk-zenz-test-usage-record-registered ()
+  (skk-zenz-test--with-henkan "▼とうろく" "とうろく"
+    (let ((skk-zenz-log-file "unused")
+          (skk-henkan-okurigana nil)
+          (skk-henkan-count 0)
+          (skk-zenz--candidates nil)
+          (skk-zenz--usage nil))
+      (should (equal (skk-zenz--note-registration "登録") "登録"))
+      (let ((record (skk-zenz--usage-record "登録")))
+        (should (equal (skk-zenz-test--fields record '(key okurigana word source))
+                       '("とうろく" "" "登録" "registered")))
+        (should-not (alist-get 'zenz record)))
+      ;; Data for another reading is not used.
+      (let ((skk-henkan-key "べつ"))
+        (should (equal (alist-get 'source (skk-zenz--usage-record "登録"))
+                       "dictionary"))))))
+
+(ert-deftest skk-zenz-test-usage-off ()
+  (skk-zenz-test--with-henkan "▼かな" "かな"
+    (let ((skk-zenz-log-file nil)
+          (skk-zenz--usage nil))
+      (skk-zenz--note "かな" :registered "仮名")
+      (should-not skk-zenz--usage))))
+
 (ert-deftest skk-zenz-test-skk-integration ()
   (skip-unless (fboundp 'skk-cus-setup))
   (let* ((dir (make-temp-file "skk-zenz-test" t))
@@ -520,8 +557,11 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                        skk-zenz--fallback-form))
                 (skk-search-excluding-word-pattern-function
                  (list #'skk-zenz--exclude-word-p))
-                (skk-zenz-learn-fallback t))
+                (skk-zenz-learn-fallback t)
+                (skk-zenz-log-file (expand-file-name "usage.jsonl" dir)))
             (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
+            (advice-add 'skk-henkan :before #'skk-zenz--reset-usage)
+            (advice-add 'skk-kakutei :before #'skk-zenz--log-confirmation)
             ;; Dictionary hit: zenz is not consulted.
             (should (equal (skk-zenz-test--type "" "K i s h a SPC")
                            '("汽車" ("汽車"))))
@@ -555,8 +595,34 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
               (should (string-match-p "^きしゃ /きしゃ-1/汽車/$" jisyo))
               (should (string-match-p "^かいとう /解答9/$" jisyo))
               (should (string-match-p "^ぶんみゃく /左|/$" jisyo))
-              (should-not (string-match-p "zenz\\|てんき" jisyo)))))
+              (should-not (string-match-p "zenz\\|てんき" jisyo)))
+            ;; One usage record per confirmation.
+            (pcase-let ((`(,kisha ,kisha-zenz ,bunmyaku ,long ,kaitou ,kaku)
+                         (skk-zenz-test--read-log skk-zenz-log-file)))
+              (should (equal (skk-zenz-test--fields kisha '(key word index source))
+                             '("きしゃ" "汽車" 0 "dictionary")))
+              (should-not (alist-get 'zenz kisha))
+              (should (equal (skk-zenz-test--fields kisha-zenz '(word index source))
+                             '("きしゃ-1" 1 "zenz-fallback")))
+              (should (equal (skk-zenz-test--fields (alist-get 'zenz kisha-zenz)
+                                                    '(trigger status rank dropped))
+                             '("fallback" "ok" 0 0)))
+              (should (equal (alist-get 'source bunmyaku) "zenz-fallback"))
+              (should (equal (skk-zenz-test--fields long '(source index))
+                             '("zenz-long" 0)))
+              (should (equal (length (alist-get 'candidates (alist-get 'zenz long))) 5))
+              (should (equal (skk-zenz-test--fields kaitou '(word source)) '("解答9" "dictionary")))
+              (should (equal (skk-zenz-test--fields (alist-get 'rerank kaitou)
+                                                    '(status count rank-before rank-after top))
+                             '("ok" 2 1 0 ("解答9" "回答1"))))
+              (should (equal (skk-zenz-test--fields kaku '(key okurigana word))
+                             '("かk" "く" "書9")))
+              (should (equal (skk-zenz-test--fields (alist-get 'rerank kaku)
+                                                    '(rank-before rank-after))
+                             '(1 0))))))
       (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
+      (advice-remove 'skk-henkan #'skk-zenz--reset-usage)
+      (advice-remove 'skk-kakutei #'skk-zenz--log-confirmation)
       (when-let* ((buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)))
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))
