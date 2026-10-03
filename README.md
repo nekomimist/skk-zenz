@@ -88,7 +88,7 @@ skk-zenz をこのディレクトリから読み込むと、サーバとモデ�
 | 変数 | 既定値 | 意味 |
 |---|---|---|
 | `skk-zenz-min-length` | `10` | この文字数以上の読みは、辞書より先に zenz で変換する。`nil` にすると、zenz は辞書の候補のあとにだけ使う。 |
-| `skk-zenz-long-candidates` | `3` | 長い読みで zenz に求める候補の数。 |
+| `skk-zenz-long-candidates` | `5` | 長い読みで zenz に求める候補の数。 |
 | `skk-zenz-fallback-candidates` | `5` | 辞書の候補のあとに zenz に求める候補の数。 |
 | `skk-zenz-context-length` | `40` | 文脈として前後それぞれに送る最大文字数。`0` にすると文脈を送らない。 |
 | `skk-zenz-context-skip-non-japanese` | `t` | 左の文脈を集めるとき、かなや漢字を含まない行（コードなど）を飛ばし、さらに上の行から拾う。変換する行は常に使う。`nil` にすると、変換位置の直前の文字をそのまま送る。 |

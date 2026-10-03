@@ -151,7 +151,7 @@ Two entries in `skk-search-prog-list`:
 - (a) Long readings: `(skk-zenz-search :long)` at the head fires when the
   reading has at least `skk-zenz-min-length` characters (default 10; nil
   disables it). zenz candidates come first for long phrases (the approach that
-  worked with Sumibi). It requests `skk-zenz-long-candidates` (default 3).
+  worked with Sumibi). It requests `skk-zenz-long-candidates` (default 5).
 - (b) Fallback: `(skk-zenz-search :fallback)` at the tail fires for other
   readings. `skk-search` stops at the first program that returns candidates and
   keeps the rest in `skk-current-search-prog-list`; later programs run only

@@ -81,8 +81,10 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 ## Phase 5: Tuning
 - [x] Offline evaluation of conversion (`scripts/eval_convert.py`,
       `zenz-server --max-context`).
-- [ ] Context length, beam width, `skk-zenz-min-length`, timeout: decide
-      from the findings below.
+- [x] Candidates for long readings: `skk-zenz-long-candidates` 3 → 5.
+- [x] Keep `skk-zenz-min-length` (10) and `skk-zenz-timeout` (1.0 s).
+- [ ] Context length: keep 40, and let `skk-zenz-context-length` above 40
+      take effect.
 - [ ] Drop candidates that trail the best by a large score gap.
 - [ ] Usage log (opt-in, local only) to check the offline findings against
       real input.

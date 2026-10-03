@@ -79,7 +79,7 @@ Shorter readings reach zenz only after the dictionaries.  If nil, zenz is
 never consulted first."
   :type '(choice (const :tag "Never first" nil) natnum))
 
-(defcustom skk-zenz-long-candidates 3
+(defcustom skk-zenz-long-candidates 5
   "Number of candidates to request for long readings."
   :type 'natnum)
 

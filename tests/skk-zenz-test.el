@@ -146,7 +146,9 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
 
 (ert-deftest skk-zenz-test-search-long-reading ()
   (skk-zenz-test--with-server nil
-    (let ((key "きょうはいいてんきですね"))
+    ;; Differs from `skk-zenz-fallback-candidates' to check which one is used.
+    (let ((key "きょうはいいてんきですね")
+          (skk-zenz-long-candidates 3))
       (should (equal (skk-zenz-test--search key :long)
                      (mapcar (lambda (i) (format "%s-%d;zenz" key i)) '(1 2 3))))
       (should-not (skk-zenz-test--search key :fallback))
