@@ -24,6 +24,7 @@ void print_usage(const char* argv0) {
         << "  --prompt KANA    print the model prompt for KANA and exit\n"
         << "  --left TEXT      left context\n"
         << "  --right TEXT     right context\n"
+        << "  --max-context C  characters of context kept on each side (default: 40)\n"
         << "  --score TEXT     with --convert, print the score of TEXT instead (repeatable)\n"
         << "  --model PATH     GGUF model (default: $ZENZ_MODEL)\n"
         << "  -n N             number of candidates for --convert (default: 1)\n"
@@ -60,26 +61,27 @@ zenz::DecodeOptions decode_options_for(const std::string& kana, int n_best, int 
 // Candidates go through the same substitutions as the prompt, so that spaces do
 // not become [UNK].
 bool score(zenz::Model& model, const zenz::PromptInput& input,
-           const std::vector<std::string>& texts, std::vector<float>* out, std::string* error) {
+           const zenz::PromptOptions& prompt_options, const std::vector<std::string>& texts,
+           std::vector<float>* out, std::string* error) {
     std::vector<std::string> normalized;
     normalized.reserve(texts.size());
     for (const std::string& text : texts) {
         normalized.push_back(zenz::normalize_for_model(text));
     }
-    return model.score(zenz::build_prompt(input), normalized, out, error);
+    return model.score(zenz::build_prompt(input, prompt_options), normalized, out, error);
 }
 
-int serve(zenz::Model& model, int beam) {
+int serve(zenz::Model& model, const zenz::PromptOptions& prompt_options, int beam) {
     std::ios::sync_with_stdio(false);
     zenz::Handlers handlers;
     handlers.convert = [&](const zenz::PromptInput& input, int n_best,
                            std::vector<zenz::Candidate>* out, std::string* error) {
-        return model.generate(zenz::build_prompt(input),
+        return model.generate(zenz::build_prompt(input, prompt_options),
                               decode_options_for(input.kana, n_best, beam), out, error);
     };
     handlers.score = [&](const zenz::PromptInput& input, const std::vector<std::string>& texts,
                          std::vector<float>* out, std::string* error) {
-        return score(model, input, texts, out, error);
+        return score(model, input, prompt_options, texts, out, error);
     };
     std::cout << zenz::hello_line() << std::endl;
     std::string line;
@@ -102,6 +104,7 @@ double elapsed_ms(std::chrono::steady_clock::time_point since) {
 int main(int argc, char** argv) {
     enum class Mode { kServe, kPrompt, kConvert } mode = Mode::kServe;
     zenz::PromptInput input;
+    zenz::PromptOptions prompt_options;
     zenz::ModelOptions model_options;
     model_options.n_threads = default_threads();
     int n_best = 1;
@@ -133,6 +136,10 @@ int main(int argc, char** argv) {
             input.left = value;
         } else if (std::strcmp(arg, "--right") == 0) {
             input.right = value;
+        } else if (std::strcmp(arg, "--max-context") == 0) {
+            int chars = 0;
+            ok = parse_int(value, &chars);
+            prompt_options.max_left_chars = prompt_options.max_right_chars = chars;
         } else if (std::strcmp(arg, "--score") == 0) {
             score_texts.push_back(value);
         } else if (std::strcmp(arg, "--model") == 0) {
@@ -155,7 +162,7 @@ int main(int argc, char** argv) {
         ++i;
     }
 
-    const std::string prompt = zenz::build_prompt(input);
+    const std::string prompt = zenz::build_prompt(input, prompt_options);
     if (mode == Mode::kPrompt) {
         std::cout << prompt << "\n";
         return 0;
@@ -177,13 +184,13 @@ int main(int argc, char** argv) {
     const double load_ms = elapsed_ms(t_load);
 
     if (mode == Mode::kServe) {
-        return serve(*model, beam);
+        return serve(*model, prompt_options, beam);
     }
 
     if (!score_texts.empty()) {
         std::vector<float> scores;
         const auto t_score = std::chrono::steady_clock::now();
-        if (!score(*model, input, score_texts, &scores, &error)) {
+        if (!score(*model, input, prompt_options, score_texts, &scores, &error)) {
             std::cerr << "error: " << error << "\n";
             return 1;
         }
@@ -192,7 +199,7 @@ int main(int argc, char** argv) {
             std::vector<float> ignored;
             const auto t_bench = std::chrono::steady_clock::now();
             for (int i = 0; i < bench; ++i) {
-                score(*model, input, score_texts, &ignored, &error);
+                score(*model, input, prompt_options, score_texts, &ignored, &error);
             }
             std::cerr << "bench: first " << score_ms << " ms, mean of " << bench << " "
                       << elapsed_ms(t_bench) / bench << " ms\n";

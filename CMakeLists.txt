@@ -53,3 +53,9 @@ add_executable(test_model tests/test_model.cpp)
 target_link_libraries(test_model PRIVATE zenz_prompt zenz_model)
 add_test(NAME model COMMAND test_model)
 set_tests_properties(model PROPERTIES SKIP_RETURN_CODE 77)
+
+# --prompt needs no model, so the command line can be checked without one.
+add_test(NAME cli_max_context
+         COMMAND zenz-server --max-context 3 --left 一二三四五 --prompt あ)
+set_tests_properties(cli_max_context PROPERTIES
+                     PASS_REGULAR_EXPRESSION "三四五" FAIL_REGULAR_EXPRESSION "二")

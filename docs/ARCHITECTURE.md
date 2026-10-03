@@ -47,7 +47,8 @@ Prompt (from AzooKeyKanaKanjiConverter `ZenzPromptBuilder.swift`):
 
 - The model generates the converted text after U+EE01 until EOS.
 - The left context is truncated to its last 40 characters, the right context to
-  its first 40 characters (azooKey defaults).
+  its first 40 characters (azooKey defaults). `zenz-server --max-context C`
+  changes both limits, for evaluation.
 - Omit the U+EE02 / U+EE07 sections when the corresponding context is empty.
 - Optional conditions: U+EE03 profile, U+EE04 topic, U+EE05 style, U+EE06
   preference (each up to 25 characters). Not used initially.
@@ -112,7 +113,7 @@ Conversion request:
 - `op`: optional, `"convert"` (default) or `"score"`.
 - `kana`: the reading, required and non-empty. Hiragana is converted to katakana.
 - `left`, `right`: optional context strings. The server trims them to 40
-  characters.
+  characters (`--max-context`).
 - `n`: optional number of candidates, default 1, clamped to 1..8. The beam
   width equals `n` unless the server was started with `--beam`.
 

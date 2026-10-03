@@ -12,3 +12,4 @@
 - `skk-zenz.el`: `skk-zenz-rerank` を有効にすると、辞書の候補を文脈に合わせて zenz で並べ替える（既定では無効）。`skk-zenz-mode` は辞書検索をまとめて `skk-zenz-rerank-search` に置き換え、モードを無効にすると元に戻す。送りありの読みも、語幹に送り仮名を付けた形で採点して並べ替える。
 - `skk-zenz.el`: 左の文脈を集めるとき、かなや漢字を含まない行を飛ばし、その上の文章を使う（`skk-zenz-context-skip-non-japanese`）。Org の src ブロックやコードの中の日本語コメントで、文脈がコードで埋まらなくなる。
 - `scripts/eval_rerank.py`: 手元の文章と SKK 辞書を使って、並べ替えの効果を評価する。
+- `zenz-server`: `--max-context` で、前後の文脈を何文字まで使うかを変えられる（既定は 40 文字）。
