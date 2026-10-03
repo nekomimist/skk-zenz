@@ -79,8 +79,80 @@ n=5. Score gaps look useful for dropping weak candidates (高校の教師 vs
 - [x] Check Emacs 29: byte-compiles without warnings and passes ERT on 29.4.
 
 ## Phase 5: Tuning
-- [ ] Context length, beam width, `skk-zenz-min-length`, timeout.
+- [x] Offline evaluation of conversion (`scripts/eval_convert.py`,
+      `zenz-server --max-context`).
+- [ ] Context length, beam width, `skk-zenz-min-length`, timeout: decide
+      from the findings below.
+- [ ] Drop candidates that trail the best by a large score gap.
+- [ ] Usage log (opt-in, local only) to check the offline findings against
+      real input.
 - [ ] Compare quality against the earlier Sumibi setup.
+
+Findings (2026-10-03, same machine as Phase 0, 4 threads). Corpora: the 12
+blog posts used in Phase 6, cut into 1168 phrases of 1 to 6 bunsetsu (as
+typed for zenz-first conversion) and 1163 words (the noun part of each
+bunsetsu, as typed for ordinary SKK conversion); and the 200 items of
+AJIMEE-Bench (Wikipedia-based, curated readings and acceptable outputs).
+Dictionaries: personal, then SKK-JISYO.L.
+
+Top-1 by left context length (n=5):
+
+| Context | Blog phrases | Blog words | AJIMEE | Mean ms (phrases) |
+|---|---|---|---|---|
+| 0 | 0.810 | 0.825 | 0.800 | 74 |
+| 10 | 0.839 | 0.911 | 0.845 | 81 |
+| 20 | 0.846 | 0.919 | 0.835 | 86 |
+| 40 | 0.849 | 0.932 | 0.845 | 101 |
+| 80 | 0.860 | 0.936 | 0.845 | 127 |
+
+- Ten characters give most of the gain. 80 adds about one point on blog
+  phrases for 26 ms; AJIMEE contexts are shorter than 40, so it gains
+  nothing there. The server caps context at 40 by default, so a client
+  `skk-zenz-context-length` above 40 currently has no effect.
+
+Candidate count (left context 40), for phrases of 10 or more kana:
+
+| n | Blog: in n-best | Mean / p95 / max ms | AJIMEE: in n-best | Mean / p95 / max ms |
+|---|---|---|---|---|
+| 1 | 0.770 | 77 / 103 / 143 | 0.831 | 86 / 188 / 311 |
+| 3 | 0.959 | 106 / 150 / 236 | 0.921 | 135 / 309 / 520 |
+| 5 | 0.987 | 133 / 194 / 310 | 0.938 | 181 / 425 / 695 |
+| 8 | 0.994 | 171 / 256 / 409 | 0.949 | 246 / 585 / 921 |
+
+- Top-1 does not depend on the beam width (0.847 to 0.850 on blog
+  phrases). Wider beams only add correct answers further down.
+- Most top-1 misses on blog phrases are spelling variants of the
+  author's style (気付く → 気づく, 時 → とき, ほう → 方, わりと → 割と); real
+  errors (最速級 → 最速急) are few.
+- The slowest requests are long AJIMEE readings with punctuation; n=5 stays
+  under 0.7 s, within `skk-zenz-timeout` (1.0 s).
+
+`skk-zenz-min-length` (blog words, left context 40, rerank `promote` θ=1):
+
+| Reading length | Words | In dictionary | Dictionary top-1 | zenz top-1 (n=3) |
+|---|---|---|---|---|
+| 1-3 | 516 | 514 | 0.982 | 0.885 |
+| 4-5 | 458 | 437 | 0.991 | 0.982 |
+| 6-7 | 114 | 55 | 0.982 | 0.982 |
+| 8-9 | 57 | 12 | 1.000 | 1.000 |
+| 10+ | 18 | 0 | - | - |
+
+- Dictionary first wins up to 5 kana; from 6 kana the two tie. No word of
+  10 or more kana and no phrase of 8 or more kana had a dictionary entry,
+  so above 6 the threshold mostly decides the candidate count (long vs
+  fallback) rather than the order.
+
+Score gap (n=5, left context 40): candidates after the first whose score
+trails the first by more than T.
+
+| T | Dropped (blog phrases) | Correct dropped | Dropped (blog words) | Correct dropped | Dropped (AJIMEE) | Correct dropped |
+|---|---|---|---|---|---|---|
+| 4 | 0.715 | 10 | 0.865 | 6 | 0.399 | 0 |
+| 6 | 0.486 | 0 | 0.705 | 1 | 0.168 | 0 |
+| 8 | 0.263 | 0 | 0.471 | 0 | 0.045 | 0 |
+
+- At T=8 the dropped candidates are broken text (検索波, 個人てきには,
+  利用して独立作成した); between 6 and 8 some are valid (格調, よく観る).
 
 ## Phase 6: Rerank dictionary candidates
 Score SKK dictionary candidates with zenz (the `score` op) and reorder them by

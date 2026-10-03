@@ -209,8 +209,8 @@ def match_ari(words, i, dicts):
 
 
 class Server:
-    def __init__(self, program, model):
-        cmd = [program] + (["--model", model] if model else [])
+    def __init__(self, program, model, args=()):
+        cmd = [program] + (["--model", model] if model else []) + list(args)
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      text=True, encoding="utf-8", bufsize=1)
         hello = json.loads(self.proc.stdout.readline())
@@ -218,15 +218,23 @@ class Server:
             sys.exit(f"unsupported server: {hello}")
         self.next_id = 0
 
-    def score(self, kana, left, right, texts):
+    def request(self, req):
         self.next_id += 1
-        req = {"id": self.next_id, "op": "score", "kana": kana, "left": left,
-               "right": right, "candidates": texts}
+        req = {"id": self.next_id, **req}
         self.proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
         resp = json.loads(self.proc.stdout.readline())
         if "error" in resp:
             raise RuntimeError(resp["error"])
-        return resp["scores"]
+        return resp
+
+    def score(self, kana, left, right, texts):
+        return self.request({"op": "score", "kana": kana, "left": left, "right": right,
+                             "candidates": texts})["scores"]
+
+    def convert(self, kana, left, right, n):
+        """Return (candidates, scores)."""
+        resp = self.request({"kana": kana, "left": left, "right": right, "n": n})
+        return resp["candidates"], resp["scores"]
 
 
 def scorable(word):

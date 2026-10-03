@@ -2,6 +2,7 @@
 /models/
 *.gguf
 *.elc
+__pycache__/
 
 # Agent skills installed locally with `npx skills add`
 /.agents/

@@ -125,7 +125,9 @@ make test
 モデルファイルは `models/zenz-v3.2-small-Q5_K_M.gguf`、または `ZENZ_MODEL` が指すファイルです。
 
 サーバの応答時間は `scripts/bench_server.py` で計測できます。
-候補の並べ替えの効果は `scripts/eval_rerank.py` で評価できます（使い方はスクリプトの先頭を参照、`uv` が必要）。設計は
+候補の並べ替えの効果は `scripts/eval_rerank.py` で評価できます。
+変換の精度と、設定値（文脈の長さ、候補の数、`skk-zenz-min-length`）による違いは `scripts/eval_convert.py` で評価できます。
+使い方はそれぞれのスクリプトの先頭を参照してください（`uv` が必要）。設計は
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、今後の計画は [docs/ROADMAP.md](docs/ROADMAP.md) にあります（どちらも英語）。
 
 ## ライセンス
