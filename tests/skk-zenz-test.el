@@ -30,7 +30,8 @@
          (skk-zenz-server-args
           (list "-Q" "--batch" "-l"
                 (expand-file-name "fake-zenz-server.el" skk-zenz-test--directory)))
-         (skk-zenz-model-file nil)
+         ;; The fake server ignores the model.
+         (skk-zenz-model-file "fake.gguf")
          (skk-zenz-annotation "zenz")
          (skk-zenz-min-length 10)
          (skk-zenz-context-length 40)
@@ -147,12 +148,14 @@ TEXT must contain \"▼\" followed by KEY; point is left after KEY."
 (ert-deftest skk-zenz-test-command-max-context ()
   (let ((skk-zenz-server-program "zenz-server")
         (skk-zenz-server-args '("--threads" "8"))
-        (skk-zenz-model-file nil))
+        (skk-zenz-model-file "/m.gguf"))
     (let ((skk-zenz-context-length 40))
-      (should (equal (skk-zenz--command) '("zenz-server" "--threads" "8"))))
+      (should (equal (skk-zenz--command)
+                     '("zenz-server" "--threads" "8" "--model" "/m.gguf"))))
     (let ((skk-zenz-context-length 80))
       (should (equal (skk-zenz--command)
-                     '("zenz-server" "--max-context" "80" "--threads" "8"))))))
+                     '("zenz-server" "--max-context" "80" "--threads" "8"
+                       "--model" "/m.gguf"))))))
 
 (ert-deftest skk-zenz-test-drop-weak ()
   (let ((skk-zenz-max-score-gap 3))
@@ -417,6 +420,251 @@ DDSKK leaves the buffer; point is left after OKURIGANA."
     (let ((skk-zenz-annotation nil))
       (should (equal (skk-zenz--strip-annotation '("仮名")) '("仮名"))))))
 
+;;; Installation
+
+(defconst skk-zenz-test--exec-path exec-path
+  "The `exec-path' to find curl and tar with.")
+
+(defmacro skk-zenz-test--with-install (&rest body)
+  "Run BODY with empty source and install directories bound to `src' and `dir'.
+Nothing is found on `exec-path', and ZENZ_MODEL is unset."
+  (declare (indent 0))
+  `(let* ((src (file-name-as-directory (make-temp-file "skk-zenz-src" t)))
+          (dir (file-name-as-directory (make-temp-file "skk-zenz-install" t)))
+          (skk-zenz--directory src)
+          (skk-zenz-install-directory dir)
+          (skk-zenz-server-program nil)
+          (skk-zenz-model-file nil)
+          (skk-zenz--installing nil)
+          (skk-zenz--last-failure nil)
+          (exec-path nil)
+          (process-environment (cons "ZENZ_MODEL" process-environment))
+          (inhibit-message t))
+     (unwind-protect
+         (progn ,@body)
+       (delete-directory src t)
+       (delete-directory dir t))))
+
+(defun skk-zenz-test--write-server (file version)
+  "Write to FILE a script that prints a hello line for VERSION on --version."
+  (make-directory (file-name-directory file) t)
+  (with-temp-file file
+    (insert "#!/bin/sh\n"
+            (format "echo '{\"hello\":\"zenz-server\",\"protocol\":%d,\"version\":\"%s\"}'\n"
+                    skk-zenz-protocol-version version)))
+  (set-file-modes file #o755))
+
+(defun skk-zenz-test--sha256-file (file)
+  "Write FILE.sha256 in the format of sha256sum."
+  (with-temp-file (concat file ".sha256")
+    (insert (skk-zenz--sha256 file) "  " (file-name-nondirectory file) "\n")))
+
+(defun skk-zenz-test--wait (predicate)
+  "Wait up to 10 seconds for PREDICATE to return non-nil."
+  (let ((deadline (+ (float-time) 10)))
+    (while (and (not (funcall predicate)) (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (funcall predicate)))
+
+(ert-deftest skk-zenz-test-version-matches-header ()
+  (require 'lisp-mnt)
+  (should (equal skk-zenz-version
+                 (lm-version (expand-file-name "../skk-zenz.el" skk-zenz-test--directory)))))
+
+(ert-deftest skk-zenz-test-model-matches-makefile ()
+  (let ((makefile (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "../Makefile" skk-zenz-test--directory))
+                    (buffer-string))))
+    (should (string-match-p (concat "^MODEL_URL [?]= " (regexp-quote skk-zenz--model-url) "$")
+                            makefile))
+    (should (string-match-p (concat "^MODEL_SHA256 [?]= " skk-zenz--model-sha256 "$")
+                            makefile))
+    (should (string-match-p (concat "^ZENZ_MODEL [?]= models/" (regexp-quote skk-zenz--model-name) "$")
+                            makefile))))
+
+(ert-deftest skk-zenz-test-server-program-order ()
+  (skk-zenz-test--with-install
+    (should-not (skk-zenz--server-program))
+    (let ((bin (file-name-as-directory (make-temp-file "skk-zenz-bin" t))))
+      (unwind-protect
+          (let ((exec-path (list bin)))
+            (skk-zenz-test--write-server (expand-file-name "zenz-server" bin) "0.0.1")
+            (should (equal (skk-zenz--server-program) (expand-file-name "zenz-server" bin)))
+            (skk-zenz-test--write-server (skk-zenz--downloaded-program) "0.0.1")
+            (should (equal (skk-zenz--server-program) (skk-zenz--downloaded-program)))
+            (skk-zenz-test--write-server (skk-zenz--local-program) "0.0.1")
+            (should (equal (skk-zenz--server-program) (skk-zenz--local-program)))
+            (let ((skk-zenz-server-program "/opt/zenz-server"))
+              (should (equal (skk-zenz--server-program) "/opt/zenz-server"))))
+        (delete-directory bin t)))))
+
+(ert-deftest skk-zenz-test-model-file-order ()
+  (skk-zenz-test--with-install
+    (should-not (skk-zenz--model-file))
+    (should-not (skk-zenz--model-available-p))
+    (let ((process-environment (cons "ZENZ_MODEL=/m.gguf" process-environment)))
+      (should (skk-zenz--model-available-p)))
+    (write-region "" nil (skk-zenz--downloaded-model))
+    (should (equal (skk-zenz--model-file) (skk-zenz--downloaded-model)))
+    (let ((local (expand-file-name (concat "models/" skk-zenz--model-name) src)))
+      (make-directory (file-name-directory local))
+      (write-region "" nil local)
+      (should (equal (skk-zenz--model-file) local)))
+    (let ((skk-zenz-model-file "/m.gguf"))
+      (should (equal (skk-zenz--model-file) "/m.gguf")))))
+
+(ert-deftest skk-zenz-test-server-needed ()
+  (skk-zenz-test--with-install
+    (should (skk-zenz--server-needed-p))
+    (skk-zenz-test--write-server (skk-zenz--downloaded-program) skk-zenz-version)
+    (should-not (skk-zenz--server-needed-p))
+    (skk-zenz-test--write-server (skk-zenz--downloaded-program) "0.0.1")
+    (should (skk-zenz--server-needed-p))
+    ;; A server the user chose or built is not replaced.
+    (let ((skk-zenz-server-program (skk-zenz--downloaded-program)))
+      (should-not (skk-zenz--server-needed-p)))
+    (skk-zenz-test--write-server (skk-zenz--local-program) "0.0.1")
+    (should-not (skk-zenz--server-needed-p))))
+
+(ert-deftest skk-zenz-test-server-url ()
+  (let ((system-type 'gnu/linux)
+        (system-configuration "aarch64-unknown-linux-gnu"))
+    (should (equal (skk-zenz--server-url)
+                   (format "https://github.com/nekomimist/skk-zenz/releases/download/v%s/zenz-server-v%s-linux-arm64.tar.gz"
+                           skk-zenz-version skk-zenz-version))))
+  (let ((system-type 'gnu/linux)
+        (system-configuration "x86_64-pc-linux-gnu"))
+    (should (equal (skk-zenz--platform) "linux-amd64")))
+  (let ((system-type 'darwin)
+        (system-configuration "aarch64-apple-darwin23"))
+    (should-not (skk-zenz--platform))))
+
+(ert-deftest skk-zenz-test-download ()
+  (skip-unless (executable-find "curl"))
+  (skk-zenz-test--with-install
+    (let ((exec-path skk-zenz-test--exec-path)
+          (source (expand-file-name "source" dir))
+          (target (expand-file-name "target" dir))
+          (result 'pending))
+      (write-region "data" nil source)
+      (skk-zenz--download (concat "file://" source) target
+                          (lambda (err) (setq result err)))
+      (should (skk-zenz-test--wait (lambda () (not (eq result 'pending)))))
+      (should-not result)
+      (should (equal (with-temp-buffer (insert-file-contents target) (buffer-string)) "data"))
+      (setq result 'pending)
+      (skk-zenz--download (concat "file://" source ".missing") target
+                          (lambda (err) (setq result err)))
+      (should (skk-zenz-test--wait (lambda () (not (eq result 'pending)))))
+      (should (string-match-p "cannot download" result)))))
+
+(defmacro skk-zenz-test--with-release (&rest body)
+  "Run BODY with downloads served from a fake release in `release'.
+`release' holds the server archive with its .sha256 and the model; the
+model's SHA-256 is bound to match."
+  (declare (indent 0))
+  `(skk-zenz-test--with-install
+     (let* ((exec-path skk-zenz-test--exec-path)
+            (release (file-name-as-directory (make-temp-file "skk-zenz-release" t)))
+            (archive (expand-file-name (file-name-nondirectory (skk-zenz--server-url))
+                                       release))
+            (model (expand-file-name "model" release))
+            (skk-zenz--model-sha256 nil))
+       (unwind-protect
+           (progn
+             (let ((stage (expand-file-name "stage" release)))
+               (skk-zenz-test--write-server (expand-file-name "zenz-server" stage)
+                                            skk-zenz-version)
+               (write-region "license" nil (expand-file-name "LICENSE" stage))
+               (call-process "tar" nil nil nil "-czf" archive "-C" stage
+                             "zenz-server" "LICENSE"))
+             (skk-zenz-test--sha256-file archive)
+             (write-region "model" nil model)
+             (setq skk-zenz--model-sha256 (skk-zenz--sha256 model))
+             (cl-letf (((symbol-function 'skk-zenz--download)
+                        (lambda (url file callback)
+                          (let ((source (if (equal url skk-zenz--model-url)
+                                            model
+                                          (expand-file-name (file-name-nondirectory url)
+                                                            release))))
+                            (if (file-exists-p source)
+                                (progn (copy-file source file t)
+                                       (funcall callback nil))
+                              (funcall callback (format "cannot download %s" url)))))))
+               ,@body))
+         (delete-directory release t)))))
+
+(ert-deftest skk-zenz-test-install ()
+  (let ((system-type 'gnu/linux)
+        (system-configuration "x86_64-pc-linux-gnu"))
+    (skk-zenz-test--with-release
+      (skk-zenz-install)
+      (should-not skk-zenz--installing)
+      (should (file-executable-p (skk-zenz--downloaded-program)))
+      (should (file-exists-p (expand-file-name "LICENSE" dir)))
+      (should (equal (skk-zenz--model-file) (skk-zenz--downloaded-model)))
+      (should-not (skk-zenz--server-needed-p))
+      ;; Only the installed files are left.
+      (should (equal (directory-files dir nil directory-files-no-dot-files-regexp)
+                     (sort (list "LICENSE" skk-zenz--model-name "zenz-server") #'string<))))))
+
+(ert-deftest skk-zenz-test-install-checksum-mismatch ()
+  (let ((system-type 'gnu/linux)
+        (system-configuration "x86_64-pc-linux-gnu"))
+    (skk-zenz-test--with-release
+      (with-temp-file (concat archive ".sha256")
+        (insert (make-string 64 ?0) "  x\n"))
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format-string &rest args)
+                     (push (apply #'format format-string args) messages))))
+          (skk-zenz-install))
+        (should (string-match-p "Checksum mismatch" (car messages))))
+      (should-not skk-zenz--installing)
+      (should-not (directory-files dir nil directory-files-no-dot-files-regexp)))))
+
+(ert-deftest skk-zenz-test-install-model-only ()
+  (skk-zenz-test--with-release
+    (skk-zenz-test--write-server (skk-zenz--downloaded-program) skk-zenz-version)
+    (let ((skk-zenz-auto-install t)
+          (skk-zenz--install-checked nil)
+          (noninteractive nil))
+      (skk-zenz--check-install)
+      (should skk-zenz--install-checked)
+      (should (equal (skk-zenz--model-file) (skk-zenz--downloaded-model)))
+      ;; It runs once per session.
+      (delete-file (skk-zenz--downloaded-model))
+      (skk-zenz--check-install)
+      (should-not (skk-zenz--model-file)))))
+
+(ert-deftest skk-zenz-test-check-install-declined ()
+  (skk-zenz-test--with-install
+    (let ((skk-zenz-auto-install 'ask)
+          (skk-zenz--install-checked nil)
+          (noninteractive nil)
+          prompt)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (p) (setq prompt p) nil))
+                ((symbol-function 'skk-zenz--run-install)
+                 (lambda (&rest _) (error "Should not install"))))
+        (skk-zenz--check-install))
+      (should (string-match-p "zenz-server and the zenz model" prompt)))))
+
+(ert-deftest skk-zenz-test-missing-install ()
+  (skk-zenz-test--with-install
+    (let ((skk-zenz-model-file "/m.gguf"))
+      (should-not (skk-zenz--ensure-process))
+      (should skk-zenz--last-failure))
+    (setq skk-zenz--last-failure nil)
+    (let ((skk-zenz-server-program "/bin/true"))
+      (should-not (skk-zenz--ensure-process))
+      (should skk-zenz--last-failure))
+    ;; No failure is recorded while a download runs.
+    (setq skk-zenz--last-failure nil)
+    (let ((skk-zenz--installing t))
+      (should-not (skk-zenz--ensure-process))
+      (should-not skk-zenz--last-failure))))
+
 ;;; Minor mode
 
 (ert-deftest skk-zenz-test-mode-installs-and-removes ()
@@ -431,6 +679,7 @@ DDSKK leaves the buffer; point is left after OKURIGANA."
           (should (memq #'skk-zenz--exclude-word-p
                         skk-search-excluding-word-pattern-function))
           (should (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))
+          (should (memq #'skk-zenz--check-install skk-mode-hook))
           ;; Enabling twice does not add duplicates.
           (skk-zenz-mode 1)
           (should (= (length skk-search-prog-list) 3)))
@@ -438,7 +687,8 @@ DDSKK leaves the buffer; point is left after OKURIGANA."
     (should (equal skk-search-prog-list '((skk-search-jisyo-file skk-jisyo 0 t))))
     (should-not (memq #'skk-zenz--exclude-word-p
                       skk-search-excluding-word-pattern-function))
-    (should-not (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))))
+    (should-not (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))
+    (should-not (memq #'skk-zenz--check-install skk-mode-hook))))
 
 (ert-deftest skk-zenz-test-mode-wraps-dictionaries ()
   (let* ((jisyo '(skk-search-jisyo-file skk-jisyo 0 t))

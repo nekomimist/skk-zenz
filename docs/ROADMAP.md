@@ -223,9 +223,9 @@ prebuilt zenz-server and the model on first use, like nekomimist/neft. Design:
       `make dist` with license notices.
 - [x] CI: build and test on push; publish release archives on `v*` tags.
       ARM64 is built and smoke-tested in CI only.
-- [ ] Client: download the server and the model into the user's Emacs
+- [x] Client: download the server and the model into the user's Emacs
       directory, verify SHA-256, and pick the executable and model to use.
-- [ ] Docs: install with elpaca and `use-package` `:vc`, release procedure.
+- [x] Docs: install with elpaca and `use-package` `:vc`, release procedure.
 - [ ] Release, then install into a clean Emacs 29 with `package-vc-install`
       and with elpaca.
 

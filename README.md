@@ -15,13 +15,49 @@
 
 ## 必要なもの
 
-- Linux x86_64（ARM64 は対応予定）
-- CMake 3.16 以降と C++17 コンパイラ
+- Linux x86_64 または ARM64（ARM64 は CI でのみ動作を確認しています）
 - Emacs 29.1 以降と DDSKK
-- git と curl
+- curl と tar（サーバとモデルのダウンロードに使います）
 - サーバ用のメモリ約 100 MB
 
-## ビルド
+配布しているサーバは、x86_64 では AVX2 に対応した CPU（2013 年の Haswell 以降）でだけ動きます。
+それより古い CPU では、サーバをソースからビルドしてください。
+
+## インストール
+
+elpaca を使う場合は次のように書きます。
+
+```elisp
+(use-package skk-zenz
+  :ensure (:host github :repo "nekomimist/skk-zenz")
+  :config
+  (skk-zenz-mode 1))
+```
+
+Emacs 30 以降では、`use-package` の `:vc` でも入れられます。
+
+```elisp
+(use-package skk-zenz
+  :vc (:url "https://github.com/nekomimist/skk-zenz")
+  :config
+  (skk-zenz-mode 1))
+```
+
+Emacs 29 では、まず `M-x package-vc-install` に `https://github.com/nekomimist/skk-zenz` を指定して入れます。
+そのあと、`(require 'skk-zenz)` と `(skk-zenz-mode 1)` を設定してください。
+
+`skk-zenz-mode` を有効にして最初に SKK を使うと、サーバ（`zenz-server`）とモデル（70 MB）を
+ダウンロードしてよいか尋ねます。`y` と答えると、`~/.emacs.d/skk-zenz/` にバックグラウンドでダウンロードします。
+ダウンロードしたファイルは、SHA-256 で検証してから使います。
+ダウンロードが終わるまでは、zenz を使わずに辞書だけで変換します。
+`M-x skk-zenz-install` を実行しても、同じようにダウンロードできます。
+
+ダウンロードするサーバは、skk-zenz のバージョンと同じリリースのものです。
+skk-zenz を更新してバージョンが変わると、新しいサーバをダウンロードしてよいか、次に SKK を使うときに尋ねます。
+
+## ソースからビルドする
+
+サーバをソースからビルドするには、CMake 3.16 以降、C++17 コンパイラ、git が必要です。
 
 ```sh
 git clone --recurse-submodules --shallow-submodules https://github.com/nekomimist/skk-zenz.git
@@ -45,6 +81,8 @@ $ build/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
 
 ## Emacs の設定
 
+ソースから使う場合は、次のように設定します。
+
 ```elisp
 (add-to-list 'load-path "/path/to/skk-zenz")
 (require 'skk-zenz)
@@ -55,9 +93,14 @@ $ build/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
 有効にすると、リストの先頭に `(skk-zenz-search :long)` を、末尾に
 `(skk-zenz-search :fallback)` を追加します。無効にすると、この 2 つを取り除いてサーバを止めます。
 
-skk-zenz をこのディレクトリから読み込むと、サーバとモデルを自動で見つけます。
-対象は `build/zenz-server` と `models/zenz-v3.2-small-Q5_K_M.gguf` です。別の場所に置いた場合は、
-`skk-zenz-server-program` と `skk-zenz-model-file`（または環境変数 `ZENZ_MODEL`）を設定してください。
+サーバとモデルは、次の順に探します。
+
+1. `skk-zenz-server-program` と `skk-zenz-model-file` に設定したファイル
+2. skk-zenz を読み込んだディレクトリの `build/zenz-server` と `models/zenz-v3.2-small-Q5_K_M.gguf`
+3. `skk-zenz-install-directory`（既定は `~/.emacs.d/skk-zenz/`）にダウンロードしたもの
+4. サーバは `PATH` 上の `zenz-server`、モデルは環境変数 `ZENZ_MODEL` が指すファイル
+
+1 か 2 でサーバが見つかったときは、サーバをダウンロードしません。
 
 ### 辞書の候補の並べ替え
 
@@ -97,6 +140,10 @@ skk-zenz をこのディレクトリから読み込むと、サーバとモデ�
 | `skk-zenz-learn-fallback` | `t` | 辞書の候補のあとに出した zenz の候補を確定したとき、個人辞書に学習するかどうか。 |
 | `skk-zenz-timeout` | `1.0` | 変換結果を待つ秒数。 |
 | `skk-zenz-server-args` | `nil` | サーバに渡す追加の引数。例: `("--threads" "8")` |
+| `skk-zenz-server-program` | `nil` | サーバの実行ファイル。`nil` なら自動で探す。 |
+| `skk-zenz-model-file` | `nil` | モデルのファイル。`nil` なら自動で探す。 |
+| `skk-zenz-install-directory` | `~/.emacs.d/skk-zenz/` | サーバとモデルのダウンロード先。 |
+| `skk-zenz-auto-install` | `ask` | サーバやモデルが足りないとき、ダウンロードの前に尋ねる。`t` なら尋ねずにダウンロードし、`nil` ならダウンロードしない。 |
 | `skk-zenz-reading-regexp` | ひらがな・ー・、。・！？ | zenz に送る読みを表す正規表現。 |
 | `skk-zenz-rerank` | `nil` | `t` なら、`skk-zenz-mode` が辞書の候補を zenz で並べ替える。設定はモードの有効化より前に行う。 |
 | `skk-zenz-rerank-method` | `promote` | 並べ替えの方法。`promote` または `mix`。 |
@@ -142,6 +189,7 @@ python3 scripts/usage_report.py ~/.skk-zenz-usage.jsonl --examples
 
 ### うまく動かないとき
 
+- サーバやモデルが見つからないときや、サーバのプロトコルのバージョンが合わないときは、`M-x skk-zenz-install` でダウンロードしてください。ソースからビルドしたサーバを使っている場合は、`make build` でビルドし直してください。
 - サーバの問題はエコーエリアに表示されます。失敗したあとは、`skk-zenz-retry-interval`（30 秒）が過ぎるまでサーバを再起動しません。すぐに再起動するには `M-x skk-zenz-restart` を実行してください。
 - サーバの標準エラー出力は、バッファ ` *zenz-server stderr*` で確認できます。
 - `skk-zenz-debug` を `t` にすると、サーバとのやりとりを `*Messages*` に記録します。
@@ -172,5 +220,7 @@ MIT License です。[LICENSE](LICENSE) を参照してください。
 ## 利用しているもの
 
 - llama.cpp（[azooKey のフォーク](https://github.com/azooKey/llama.cpp)、ブランチ `azookey/b9637-compat`）: MIT License。本家の llama.cpp は zenz のトークナイザを読み込めないため、フォークが必要です。
-- Miwa-Keita 氏の zenz-v3.2-small モデル: Apache License 2.0。このリポジトリには含めていません。`make model` でダウンロードします。
+- Miwa-Keita 氏の zenz-v3.2-small モデル: Apache License 2.0。このリポジトリには含めていません。`M-x skk-zenz-install` または `make model` で Hugging Face からダウンロードします。
 - プロンプトの形式と前処理は [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter) に従っています。AzooKeyKanaKanjiConverter は MIT License です（Copyright (c) 2023 Miwa / Ensan）。
+
+配布しているサーバのアーカイブには、llama.cpp などのライセンス表示を `THIRD-PARTY-NOTICES` として同梱しています。

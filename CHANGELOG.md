@@ -16,5 +16,7 @@
 - `scripts/eval_rerank.py`: 手元の文章と SKK 辞書を使って、並べ替えの効果を評価する。
 - `scripts/eval_convert.py`: 手元の文章や AJIMEE-Bench を使って、文脈の長さ、候補の数、読みの長さごとに変換の精度を評価する。
 - `zenz-server`: `--version` で、サーバのバージョンとプロトコルのバージョンを表示する。モデルは読み込まない。起動時の hello 行にもバージョンを含める。
+- `skk-zenz.el`: サーバやモデルが見つからないとき、最初に SKK を使うタイミングでダウンロードを提案する（`skk-zenz-auto-install`）。`M-x skk-zenz-install` でもダウンロードできる。ダウンロード先は `skk-zenz-install-directory`（既定は `~/.emacs.d/skk-zenz/`）で、SHA-256 を検証する。elpaca や `use-package` の `:vc` だけで導入できる。
+- `skk-zenz.el`: `skk-zenz-server-program` と `skk-zenz-model-file` の既定値を `nil` にした。`nil` のときは、ソースのディレクトリ、ダウンロード先、`PATH`（モデルは `ZENZ_MODEL`）の順に探す。値を設定している場合は、これまでどおりその値を使う。
 - `make dist` で、ほかのマシンでも動く `zenz-server` を配布用のアーカイブにまとめる。アーカイブには llama.cpp などのライセンス表示を含める。x86_64 では AVX2 が必要。
 - `zenz-server`: `--max-context` で、前後の文脈を何文字まで使うかを変えられる（既定は 40 文字）。`skk-zenz-context-length` が 40 より大きいときは、`skk-zenz.el` がこのオプションを渡す。

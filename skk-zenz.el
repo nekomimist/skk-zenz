@@ -33,6 +33,12 @@
 ;; With `skk-zenz-rerank' set, the mode also merges the dictionary
 ;; programs into one `skk-zenz-rerank-search' entry, which reorders
 ;; dictionary candidates by how well zenz thinks they fit the context.
+;;
+;; If `zenz-server' or the model is missing, skk-zenz offers to download
+;; them into `skk-zenz-install-directory' when `skk-mode' is first
+;; turned on (see `skk-zenz-auto-install'); `skk-zenz-install' does the
+;; same on demand.
+;;
 ;; See docs/ARCHITECTURE.md for the design.
 
 ;;; Code:
@@ -50,23 +56,43 @@
 (defconst skk-zenz-protocol-version 2
   "Protocol version this client speaks.  Must match `zenz-server'.")
 
+(defconst skk-zenz-version "0.1.0"
+  "Version of skk-zenz.  Must match the Version header.
+It also names the `zenz-server' release that `skk-zenz-install'
+downloads.")
+
 (defconst skk-zenz--directory
   (file-name-directory (or load-file-name buffer-file-name default-directory))
   "Directory skk-zenz was loaded from.")
 
-(defcustom skk-zenz-server-program
-  (let ((local (expand-file-name "build/zenz-server" skk-zenz--directory)))
-    (if (file-executable-p local) local "zenz-server"))
-  "Path to the `zenz-server' executable."
-  :type 'string)
+(defcustom skk-zenz-server-program nil
+  "Path to the `zenz-server' executable, or nil to find it.
+If nil, use the first of: build/zenz-server in the directory skk-zenz
+was loaded from, the copy `skk-zenz-install' downloaded into
+`skk-zenz-install-directory', and `zenz-server' on variable `exec-path'."
+  :type '(choice (const :tag "Find automatically" nil) file))
 
-(defcustom skk-zenz-model-file
-  (let ((local (expand-file-name "models/zenz-v3.2-small-Q5_K_M.gguf"
-                                 skk-zenz--directory)))
-    (and (file-readable-p local) local))
-  "Path to the zenz GGUF model.
-If nil, `zenz-server' uses the ZENZ_MODEL environment variable."
-  :type '(choice (const :tag "Use $ZENZ_MODEL" nil) file))
+(defcustom skk-zenz-model-file nil
+  "Path to the zenz GGUF model, or nil to find it.
+If nil, use the first of: models/zenz-v3.2-small-Q5_K_M.gguf in the
+directory skk-zenz was loaded from, and the copy `skk-zenz-install'
+downloaded into `skk-zenz-install-directory'.  If neither exists,
+`zenz-server' uses the ZENZ_MODEL environment variable."
+  :type '(choice (const :tag "Find automatically" nil) file))
+
+(defcustom skk-zenz-install-directory (locate-user-emacs-file "skk-zenz/")
+  "Directory `skk-zenz-install' downloads `zenz-server' and the model into."
+  :type 'directory)
+
+(defcustom skk-zenz-auto-install 'ask
+  "Whether to download a missing `zenz-server' or model automatically.
+The check runs once per session, when `skk-mode' is first turned on
+with `skk-zenz-mode' enabled.  If `ask', ask before downloading; if t,
+download without asking; if nil, never download (run
+`skk-zenz-install' instead)."
+  :type '(choice (const :tag "Ask first" ask)
+                 (const :tag "Always" t)
+                 (const :tag "Never" nil)))
 
 (defcustom skk-zenz-server-args nil
   "Extra command line arguments for `zenz-server', such as (\"--threads\" \"8\")."
@@ -261,6 +287,262 @@ Collected for `skk-zenz-log-file' only.")
           (unless (string-empty-p text)
             (car (last (split-string text "\n")))))))))
 
+;;; Installation
+
+(defconst skk-zenz--model-name "zenz-v3.2-small-Q5_K_M.gguf"
+  "File name of the zenz model.")
+
+(defconst skk-zenz--model-url
+  "https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf/resolve/c67e03e07d215c869f591b274c1631170d3e11fe/ggml-model-Q5_K_M.gguf"
+  "URL of the zenz model, pinned to a model repository revision.
+Must match MODEL_URL in the Makefile.")
+
+(defconst skk-zenz--model-sha256
+  "29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
+  "SHA-256 of the file at `skk-zenz--model-url'.")
+
+(defconst skk-zenz--release-url
+  "https://github.com/nekomimist/skk-zenz/releases/download/"
+  "Base URL of the `zenz-server' release archives.")
+
+(defvar skk-zenz--installing nil
+  "Non-nil while `skk-zenz-install' is downloading.")
+
+(defvar skk-zenz--install-checked nil
+  "Non-nil once `skk-zenz--check-install' has run in this session.")
+
+(defun skk-zenz--local-program ()
+  "Return where `make build' puts `zenz-server' in a source checkout."
+  (expand-file-name "build/zenz-server" skk-zenz--directory))
+
+(defun skk-zenz--downloaded-program ()
+  "Return where `skk-zenz-install' puts `zenz-server'."
+  (expand-file-name "zenz-server" skk-zenz-install-directory))
+
+(defun skk-zenz--downloaded-model ()
+  "Return where `skk-zenz-install' puts the model."
+  (expand-file-name skk-zenz--model-name skk-zenz-install-directory))
+
+(defun skk-zenz--server-program ()
+  "Return the `zenz-server' executable to run, or nil if none is found.
+See `skk-zenz-server-program'."
+  (or skk-zenz-server-program
+      (seq-find #'file-executable-p
+                (list (skk-zenz--local-program) (skk-zenz--downloaded-program)))
+      (executable-find "zenz-server")))
+
+(defun skk-zenz--model-file ()
+  "Return the model file to pass to `zenz-server', or nil.
+See `skk-zenz-model-file'."
+  (or skk-zenz-model-file
+      (seq-find #'file-readable-p
+                (list (expand-file-name (concat "models/" skk-zenz--model-name)
+                                        skk-zenz--directory)
+                      (skk-zenz--downloaded-model)))))
+
+(defun skk-zenz--model-available-p ()
+  "Return non-nil if `zenz-server' will find a model."
+  (or (skk-zenz--model-file)
+      (let ((env (getenv "ZENZ_MODEL")))
+        (and env (not (string-empty-p env))))))
+
+(defun skk-zenz--probe (program)
+  "Return what PROGRAM --version prints, as an alist, or nil on failure."
+  (with-temp-buffer
+    (when (eql 0 (ignore-errors
+                   (let ((default-directory (expand-file-name "~/")))
+                     (call-process program nil '(t nil) nil "--version"))))
+      (ignore-errors
+        (json-parse-string (string-trim (buffer-string)) :object-type 'alist)))))
+
+(defun skk-zenz--server-needed-p ()
+  "Return non-nil if `zenz-server' should be downloaded.
+That is when none is found, when the downloaded one is not the release
+for this version of skk-zenz, or when the one on variable `exec-path' speaks
+another protocol.  A server named by `skk-zenz-server-program' or built
+in a source checkout is left alone."
+  (let ((program (skk-zenz--server-program)))
+    (cond
+     ((null program) t)
+     ((or skk-zenz-server-program (equal program (skk-zenz--local-program))) nil)
+     ((equal program (skk-zenz--downloaded-program))
+      (not (equal (alist-get 'version (skk-zenz--probe program)) skk-zenz-version)))
+     (t
+      (not (eql (alist-get 'protocol (skk-zenz--probe program))
+                skk-zenz-protocol-version))))))
+
+(defun skk-zenz--platform ()
+  "Return the platform of the `zenz-server' release for this system, or nil."
+  (let ((arch (car (split-string system-configuration "-"))))
+    (and (eq system-type 'gnu/linux)
+         (cond
+          ((member arch '("x86_64" "amd64")) "linux-amd64")
+          ((member arch '("aarch64" "arm64")) "linux-arm64")))))
+
+(defun skk-zenz--server-url ()
+  "Return the URL of the `zenz-server' release archive for this system."
+  (format "%sv%s/zenz-server-v%s-%s.tar.gz"
+          skk-zenz--release-url skk-zenz-version skk-zenz-version
+          (skk-zenz--platform)))
+
+(defun skk-zenz--download (url file callback)
+  "Download URL into FILE in the background, then call CALLBACK.
+CALLBACK receives nil on success or an error message."
+  (condition-case err
+      (let ((output (generate-new-buffer " *skk-zenz download*"))
+            ;; The current buffer may visit a remote or deleted directory.
+            (default-directory (file-name-directory file)))
+        (make-process
+         :name "skk-zenz-download"
+         :buffer output
+         :command (list "curl" "-fsSL" "--retry" "3" "-o" file url)
+         :connection-type 'pipe
+         :noquery t
+         :sentinel
+         (lambda (proc _event)
+           (unless (process-live-p proc)
+             (let ((text (with-current-buffer output (string-trim (buffer-string)))))
+               (kill-buffer output)
+               (funcall callback
+                        (unless (eql (process-exit-status proc) 0)
+                          (format "cannot download %s: %s" url text))))))))
+    (error
+     (funcall callback (format "cannot run curl: %s" (error-message-string err))))))
+
+(defun skk-zenz--sha256 (file)
+  "Return the SHA-256 of FILE as a hex string."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally file)
+    (secure-hash 'sha256 (current-buffer))))
+
+(defun skk-zenz--unpack-server (archive tmp dir)
+  "Check ARCHIVE against ARCHIVE.sha256, extract it in TMP, and move it to DIR.
+Moving within DIR replaces a running `zenz-server' safely."
+  (let ((expected (with-temp-buffer
+                    (insert-file-contents (concat archive ".sha256"))
+                    (car (split-string (buffer-string))))))
+    (unless (and expected (string= (downcase expected) (skk-zenz--sha256 archive)))
+      (error "Checksum mismatch for %s" (file-name-nondirectory archive))))
+  (let ((out (expand-file-name "unpacked" tmp)))
+    (make-directory out)
+    (unless (eql 0 (let ((default-directory tmp))
+                     (call-process "tar" nil nil nil "-xzf" archive "-C" out)))
+      (error "Cannot extract %s" (file-name-nondirectory archive)))
+    (unless (file-executable-p (expand-file-name "zenz-server" out))
+      (error "No zenz-server in %s" (file-name-nondirectory archive)))
+    (dolist (file (directory-files out nil directory-files-no-dot-files-regexp))
+      (rename-file (expand-file-name file out) (expand-file-name file dir) t))))
+
+(defun skk-zenz--install-server (callback)
+  "Download `zenz-server' into `skk-zenz-install-directory', then call CALLBACK.
+CALLBACK receives nil on success or an error message."
+  (let* ((dir (file-name-as-directory (expand-file-name skk-zenz-install-directory)))
+         (url (skk-zenz--server-url))
+         (tmp (progn (make-directory dir t)
+                     (make-temp-file (expand-file-name "download-" dir) t)))
+         (archive (expand-file-name (file-name-nondirectory url) tmp))
+         (finish (lambda (err)
+                   (delete-directory tmp t)
+                   (funcall callback err))))
+    (skk-zenz--download
+     url archive
+     (lambda (err)
+       (if err
+           (funcall finish err)
+         (skk-zenz--download
+          (concat url ".sha256") (concat archive ".sha256")
+          (lambda (err)
+            (funcall finish
+                     (or err
+                         (condition-case e
+                             (progn (skk-zenz--unpack-server archive tmp dir) nil)
+                           (error (error-message-string e))))))))))))
+
+(defun skk-zenz--install-model (callback)
+  "Download the model into `skk-zenz-install-directory', then call CALLBACK.
+CALLBACK receives nil on success or an error message."
+  (let* ((file (skk-zenz--downloaded-model))
+         (part (concat file ".part")))
+    (make-directory (file-name-directory file) t)
+    (skk-zenz--download
+     skk-zenz--model-url part
+     (lambda (err)
+       (let ((err (or err
+                      (condition-case e
+                          (if (string= (skk-zenz--sha256 part) skk-zenz--model-sha256)
+                              (progn (rename-file part file t) nil)
+                            (format "checksum mismatch for %s" skk-zenz--model-name))
+                        (error (error-message-string e))))))
+         (when (file-exists-p part)
+           (delete-file part))
+         (funcall callback err))))))
+
+(defun skk-zenz--run-install (server model)
+  "Download `zenz-server' if SERVER and the model if MODEL, in the background."
+  (setq skk-zenz--installing t)
+  (let* ((finish (lambda (err)
+                   (setq skk-zenz--installing nil
+                         skk-zenz--last-failure nil)
+                   ;; The next conversion starts the new server.
+                   (skk-zenz-stop)
+                   (if err
+                       (message "skk-zenz: %s" err)
+                     (message "skk-zenz: installed into %s"
+                              (abbreviate-file-name skk-zenz-install-directory)))))
+         (then-model (lambda (err)
+                       (cond
+                        (err (funcall finish err))
+                        (model
+                         (message "skk-zenz: downloading the zenz model (70 MB)...")
+                         (skk-zenz--install-model finish))
+                        (t (funcall finish nil))))))
+    (if server
+        (progn
+          (message "skk-zenz: downloading zenz-server...")
+          (skk-zenz--install-server then-model))
+      (funcall then-model nil))))
+
+;;;###autoload
+(defun skk-zenz-install ()
+  "Download `zenz-server' and the model into `skk-zenz-install-directory'.
+The server is the release for this version of skk-zenz.  The model is
+downloaded only if no model is available (see `skk-zenz-model-file').
+Both are checked against their SHA-256.  The download runs in the
+background and needs curl and tar."
+  (interactive)
+  (when skk-zenz--installing
+    (user-error "A skk-zenz download is already running"))
+  (unless (skk-zenz--platform)
+    (user-error "No zenz-server release for %s; build it from source"
+                system-configuration))
+  (skk-zenz--run-install t (not (skk-zenz--model-available-p))))
+
+(defun skk-zenz--check-install ()
+  "Offer to download a missing `zenz-server' or model, once per session.
+Run from `skk-mode-hook'; see `skk-zenz-auto-install'."
+  (unless (or skk-zenz--install-checked skk-zenz--installing
+              noninteractive (not skk-zenz-auto-install))
+    (setq skk-zenz--install-checked t)
+    (condition-case err
+        (let ((server (skk-zenz--server-needed-p))
+              (model (not (skk-zenz--model-available-p))))
+          (when (and server (not (skk-zenz--platform)))
+            (message "skk-zenz: no zenz-server release for %s; build it from source"
+                     system-configuration)
+            (setq server nil))
+          (when (or server model)
+            (if (or (eq skk-zenz-auto-install t)
+                    (y-or-n-p
+                     (format "Download %s into %s for skk-zenz? "
+                             (string-join (delq nil (list (and server "zenz-server")
+                                                          (and model "the zenz model (70 MB)")))
+                                          " and ")
+                             (abbreviate-file-name skk-zenz-install-directory))))
+                (skk-zenz--run-install server model)
+              (message "skk-zenz: run M-x skk-zenz-install to download later"))))
+      (error (message "skk-zenz: %s" (error-message-string err))))))
+
 ;;; Process management
 
 (defconst skk-zenz--server-context-length 40
@@ -268,12 +550,12 @@ Collected for `skk-zenz-log-file' only.")
 
 (defun skk-zenz--command ()
   "Return the command line for `zenz-server'."
-  (append (list skk-zenz-server-program)
-          (and (> skk-zenz-context-length skk-zenz--server-context-length)
-               (list "--max-context" (number-to-string skk-zenz-context-length)))
-          skk-zenz-server-args
-          (and skk-zenz-model-file
-               (list "--model" (expand-file-name skk-zenz-model-file)))))
+  (let ((model (skk-zenz--model-file)))
+    (append (list (skk-zenz--server-program))
+            (and (> skk-zenz-context-length skk-zenz--server-context-length)
+                 (list "--max-context" (number-to-string skk-zenz-context-length)))
+            skk-zenz-server-args
+            (and model (list "--model" (expand-file-name model))))))
 
 (defun skk-zenz--start ()
   "Start `zenz-server' without waiting for it to become ready."
@@ -323,8 +605,9 @@ Collected for `skk-zenz-log-file' only.")
       (let ((version (alist-get 'protocol msg)))
         (if (eql version skk-zenz-protocol-version)
             (setq skk-zenz--ready t)
-          (skk-zenz--fail (format "protocol mismatch (server %s, client %s); rebuild zenz-server"
-                                  version skk-zenz-protocol-version))
+          (skk-zenz--fail (format "protocol mismatch (server %s, client %s); %s"
+                                  version skk-zenz-protocol-version
+                                  "run M-x skk-zenz-install or rebuild zenz-server"))
           (delete-process proc))))
      (t
       (let ((id (alist-get 'id msg)))
@@ -352,8 +635,15 @@ Return nil if the server cannot be started or failed recently."
   (cond
    ((and (process-live-p skk-zenz--process) skk-zenz--ready)
     skk-zenz--process)
-   ((and skk-zenz--last-failure
-         (< (- (float-time) skk-zenz--last-failure) skk-zenz-retry-interval))
+   ((or skk-zenz--installing
+        (and skk-zenz--last-failure
+             (< (- (float-time) skk-zenz--last-failure) skk-zenz-retry-interval)))
+    nil)
+   ((not (skk-zenz--server-program))
+    (skk-zenz--fail "zenz-server not found; run M-x skk-zenz-install")
+    nil)
+   ((not (skk-zenz--model-available-p))
+    (skk-zenz--fail "no zenz model; run M-x skk-zenz-install")
     nil)
    (t
     (let ((started (float-time)))
@@ -362,7 +652,8 @@ Return nil if the server cannot be started or failed recently."
             (skk-zenz--start)
           (error
            (skk-zenz--fail (format "cannot start %s: %s"
-                                   skk-zenz-server-program (error-message-string err))))))
+                                   (skk-zenz--server-program)
+                                   (error-message-string err))))))
       (let ((proc skk-zenz--process)
             (deadline (+ (float-time) skk-zenz-startup-timeout)))
         (while (and (process-live-p proc)
@@ -879,6 +1170,7 @@ by zenz."
           (setq skk-search-prog-list (skk-zenz--wrap-dictionaries skk-search-prog-list)))
         (add-hook 'skk-search-excluding-word-pattern-function
                   #'skk-zenz--exclude-word-p)
+        (add-hook 'skk-mode-hook #'skk-zenz--check-install)
         (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
         (advice-add 'skk-henkan :before #'skk-zenz--reset-usage)
         (advice-add 'skk-henkan-in-minibuff :filter-return #'skk-zenz--note-registration)
@@ -890,6 +1182,7 @@ by zenz."
                        skk-search-prog-list)))
     (remove-hook 'skk-search-excluding-word-pattern-function
                  #'skk-zenz--exclude-word-p)
+    (remove-hook 'skk-mode-hook #'skk-zenz--check-install)
     (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
     (advice-remove 'skk-henkan #'skk-zenz--reset-usage)
     (advice-remove 'skk-henkan-in-minibuff #'skk-zenz--note-registration)

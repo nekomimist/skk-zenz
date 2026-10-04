@@ -295,6 +295,9 @@ sent anywhere. `scripts/usage_report.py` summarizes it.
 - Each search waits up to `skk-zenz-timeout` (1 s). On timeout the search
   returns nil and the late reply is discarded. The server still finishes the
   old request first, so the next search may be delayed.
+- If no server or no model is found (see Installation), the search reports it
+  with a hint to run `M-x skk-zenz-install`, as a failure. While a download
+  runs, searches return nil without a failure.
 - If the server cannot start, reports a different protocol version, or exits,
   the failure is shown in the echo area and no restart is attempted for
   `skk-zenz-retry-interval` (30 s). Conversions continue without zenz in the
@@ -358,3 +361,41 @@ Release binaries let users install skk-zenz as a package (elpaca, or
 - Release procedure: set `;; Version:` in `skk-zenz.el` to `X.Y.Z`, give the
   unreleased section of `CHANGELOG.md` that version, commit, then push the
   tag `vX.Y.Z`.
+
+### Installation (client)
+- `skk-zenz-server-program` and `skk-zenz-model-file` default to nil, which
+  means: a source checkout's `build/zenz-server` and
+  `models/zenz-v3.2-small-Q5_K_M.gguf` (next to the loaded `skk-zenz.el`),
+  then the copies in `skk-zenz-install-directory`
+  (`~/.emacs.d/skk-zenz/`), then `zenz-server` on `exec-path` and
+  `$ZENZ_MODEL`. elpaca loads the package from a build directory of
+  symlinks, so it never finds a checkout's build there; package-vc loads it
+  from the checkout itself.
+- `skk-zenz-version` must equal the Version header (an ERT test checks it).
+  The server URL is
+  `https://github.com/nekomimist/skk-zenz/releases/download/vX.Y.Z/zenz-server-vX.Y.Z-linux-ARCH.tar.gz`.
+  The model URL and SHA-256 are pinned in `skk-zenz.el` and must match the
+  Makefile (an ERT test checks it).
+- Whether to download, decided once per session from `skk-mode-hook` (the
+  user is about to type, and the frame can show a prompt, unlike during init
+  or in a daemon without a frame); `skk-zenz-auto-install` chooses between
+  asking, downloading, and doing nothing:
+  - Server: when none is found, when the downloaded one reports a `version`
+    other than `skk-zenz-version` (so a package update fetches the matching
+    release), or when the one on `exec-path` speaks another protocol. A server
+    set by the user or built in a checkout is never replaced. Checks use
+    `zenz-server --version`.
+  - Model: when none is found and `ZENZ_MODEL` is unset.
+- `M-x skk-zenz-install` always downloads the server and downloads the model
+  if none is found.
+- Downloads run in the background with curl, so Emacs stays usable while the
+  70 MB model arrives. The server archive goes into a temporary directory
+  inside the install directory, is checked against its `.sha256`, extracted
+  with tar, and its files are renamed into place (a rename replaces a
+  running server safely). The model is written to a `.part` file, checked
+  against the pinned SHA-256, and renamed. When a download ends, the server
+  is stopped and the failure state cleared, so the next search starts the
+  new server.
+- A user tracking the default branch between releases gets the server of the
+  last release. If the protocol changed since then, the mismatch is reported
+  and the server must be built from source until the next release.
