@@ -1,4 +1,6 @@
 BUILD_DIR ?= build
+DIST_BUILD_DIR ?= build-dist
+DIST_DIR ?= dist
 BUILD_TYPE ?= Release
 JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 EMACS ?= emacs
@@ -19,7 +21,7 @@ MODEL_SHA256 ?= 29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673
 EMACS_BATCH = $(EMACS) -Q --batch --eval "(setq warning-suppress-log-types '((files missing-lexbind-cookie)))" \
 	-L . -L $(DDSKK_DIR)
 
-.PHONY: all build model test test-cpp test-elisp compile clean
+.PHONY: all build dist model test test-cpp test-elisp compile clean
 
 all: build
 
@@ -28,6 +30,12 @@ $(BUILD_DIR)/CMakeCache.txt:
 
 build: $(BUILD_DIR)/CMakeCache.txt
 	cmake --build $(BUILD_DIR) -j $(JOBS)
+
+# Release archive of a portable zenz-server (see scripts/dist.sh).
+dist:
+	cmake -S . -B $(DIST_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DZENZ_PORTABLE=ON
+	cmake --build $(DIST_BUILD_DIR) -j $(JOBS) --target zenz-server
+	scripts/dist.sh $(DIST_BUILD_DIR) $(DIST_DIR)
 
 # A source checkout has no autoloads until `make install`; generate them.
 # loaddefs-gen warns that it cannot load skk-gadget.el; the output is complete
@@ -58,4 +66,4 @@ test-elisp: compile
 	$(EMACS_BATCH) -l tests/skk-zenz-test.el -f ert-run-tests-batch-and-exit
 
 clean:
-	rm -rf $(BUILD_DIR) skk-zenz.elc
+	rm -rf $(BUILD_DIR) $(DIST_BUILD_DIR) $(DIST_DIR) skk-zenz.elc

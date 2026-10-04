@@ -19,6 +19,7 @@ void print_usage(const char* argv0) {
         << "usage: " << argv0 << " [options]                 serve JSON Lines on stdin/stdout\n"
         << "       " << argv0 << " [options] --convert KANA\n"
         << "       " << argv0 << " [options] --prompt KANA\n"
+        << "       " << argv0 << " --version\n"
         << "\n"
         << "  --convert KANA   convert KANA and print candidates, one per line\n"
         << "  --prompt KANA    print the model prompt for KANA and exit\n"
@@ -31,7 +32,8 @@ void print_usage(const char* argv0) {
         << "  --beam W         fixed beam width (default: number of candidates, at most 8)\n"
         << "  --threads T      inference threads (default: min(4, CPUs))\n"
         << "  --bench N        run the conversion N times and report the mean time\n"
-        << "  --verbose        print llama.cpp logs, scores, and timings to stderr\n";
+        << "  --verbose        print llama.cpp logs, scores, and timings to stderr\n"
+        << "  --version        print the hello line (version and protocol) and exit\n";
 }
 
 bool parse_int(const char* s, int* out) {
@@ -120,6 +122,10 @@ int main(int argc, char** argv) {
         const char* arg = argv[i];
         const char* value = i + 1 < argc ? argv[i + 1] : nullptr;
         bool ok = true;
+        if (std::strcmp(arg, "--version") == 0) {
+            std::cout << zenz::hello_line() << "\n";
+            return 0;
+        }
         if (std::strcmp(arg, "--verbose") == 0) {
             model_options.verbose = true;
             continue;

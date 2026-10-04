@@ -214,6 +214,30 @@ scored):
   segmentation turns some okuri-ari words into okuri-nashi entries (かき →
   書き), and the texts may overlap with the model's training data.
 
+## Phase 7: Package install
+Install with elpaca or `use-package` `:vc` alone: the client downloads a
+prebuilt zenz-server and the model on first use, like nekomimist/neft. Design:
+`ARCHITECTURE.md` (Release Binaries).
+
+- [x] Portable build (`ZENZ_PORTABLE`), `zenz-server --version`, and
+      `make dist` with license notices.
+- [ ] CI: build and test on push; publish release archives on `v*` tags.
+- [ ] Client: download the server and the model into the user's Emacs
+      directory, verify SHA-256, and pick the executable and model to use.
+- [ ] Docs: install with elpaca and `use-package` `:vc`, release procedure.
+- [ ] Release, then install into a clean Emacs 29 with `package-vc-install`
+      and with elpaca.
+
+Findings (2026-10-04, same machine as Phase 0, 4 threads, mean of 30 runs;
+22-kana reading with left context 試験問題の, and a score request of four
+texts for かいとう):
+
+| Build | Convert n=1 | Convert n=5 | Score |
+|---|---|---|---|
+| `-march=native` | 52 ms | 131 ms | 23 ms |
+| `GGML_NATIVE=OFF` (x86-64-v3) | 53 ms | 132 ms | 23 ms |
+| x86-64-v2 (SSE4.2 only) | 152 ms | 412 ms | 75 ms |
+
 ## Later
 - Linux ARM64 support.
 - Okuri-ari conversion by zenz (candidates beyond the dictionary).

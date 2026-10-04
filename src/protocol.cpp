@@ -5,6 +5,9 @@
 #include <nlohmann/json.hpp>
 
 namespace zenz {
+
+const char* const kServerVersion = ZENZ_VERSION;
+
 namespace {
 
 using json = nlohmann::json;
@@ -34,7 +37,7 @@ bool optional_string(const json& obj, const char* key, std::string* out) {
 }  // namespace
 
 std::string hello_line() {
-    return dump(json{{"hello", "zenz-server"}, {"protocol", kProtocolVersion}});
+    return dump(json{{"hello", "zenz-server"}, {"protocol", kProtocolVersion}, {"version", kServerVersion}});
 }
 
 std::string handle_line(const std::string& line, const Handlers& handlers) {

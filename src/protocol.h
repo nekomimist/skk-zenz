@@ -14,6 +14,9 @@ namespace zenz {
 // Bump on incompatible changes; the client checks it against its own version.
 constexpr int kProtocolVersion = 2;
 
+// The server version, which follows the Emacs package version.
+extern const char* const kServerVersion;
+
 // Upper bound for the "n" field of a request.
 constexpr int kMaxCandidates = 8;
 
@@ -32,7 +35,8 @@ struct Handlers {
     ScoreFn score;
 };
 
-// First line the server writes after the model has loaded.
+// First line the server writes after the model has loaded. --version prints
+// it too, without loading a model.
 std::string hello_line();
 
 // Parses one request line, runs the handler for its "op", and returns one

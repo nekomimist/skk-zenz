@@ -43,6 +43,7 @@ void test_hello() {
     json hello = json::parse(zenz::hello_line());
     CHECK_EQ(hello["hello"].get<std::string>(), "zenz-server");
     CHECK_EQ(hello["protocol"].get<int>(), zenz::kProtocolVersion);
+    CHECK_EQ(hello["version"].get<std::string>(), std::string(zenz::kServerVersion));
 }
 
 void test_success() {

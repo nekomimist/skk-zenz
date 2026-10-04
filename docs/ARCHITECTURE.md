@@ -97,9 +97,12 @@ time, in order.
 
 After the model loads, the server writes a hello line:
 ```json
-{"hello": "zenz-server", "protocol": 2}
+{"hello": "zenz-server", "protocol": 2, "version": "0.1.0"}
 ```
-The client must check `protocol` against its own version. The server exits
+The client must check `protocol` against its own version. `version` is the
+server's build version (see Release Binaries) and is informational only.
+`zenz-server --version` prints the same line and exits without loading a
+model, so a client can check an executable cheaply. The server exits
 with status 0 when stdin reaches EOF. If the model fails to load, the server
 writes the reason to stderr and exits with a non-zero status before the hello.
 
@@ -315,3 +318,32 @@ sent anywhere. `scripts/usage_report.py` summarizes it.
   upstream, carry the same patch on top of upstream instead.
 - The vocabulary is byte-level BPE with 6000 tokens. Each U+EExx tag encodes
   as three byte tokens; this matches how azooKey tokenizes prompts.
+
+## Release Binaries
+Release binaries let users install skk-zenz as a package (elpaca, or
+`use-package` with `:vc`) without building zenz-server.
+
+- Version: CMake reads the `;; Version:` header of `skk-zenz.el`, and
+  zenz-server reports it in the hello line. A release tag `vX.Y.Z` must match
+  the header, so the package version names the server binary to download.
+- `cmake -DZENZ_PORTABLE=ON` (used by `make dist`) builds a binary that runs
+  on machines other than the build machine:
+  - `GGML_NATIVE=OFF`. On x86_64, ggml then enables AVX, AVX2, FMA, F16C, and
+    BMI2, which is about x86-64-v3 (Haswell, 2013, and later). Elsewhere it
+    uses the base instruction set.
+  - `GGML_OPENMP=OFF`, so the binary does not need libgomp. ggml uses its own
+    thread pool instead.
+  - `-static-libstdc++ -static-libgcc`, so only the C library is needed.
+    The glibc requirement is that of the build machine; release builds run
+    on Ubuntu 22.04 (glibc 2.35).
+- x86-64-v3 runs as fast as `-march=native`; an x86-64-v2 build (SSE4.2 only)
+  was about three times slower (findings in `ROADMAP.md`). CPUs without AVX2
+  can build from source.
+- `make dist` writes `dist/zenz-server-vX.Y.Z-linux-ARCH.tar.gz` (ARCH is
+  `amd64` or `arm64`) and a `sha256sum`-style `.sha256` file.
+  `scripts/dist.sh` refuses binaries that need libraries other than the C
+  library.
+- The archive holds `zenz-server`, `LICENSE`, and `THIRD-PARTY-NOTICES`. The
+  notices cover the MIT-licensed code compiled into zenz-server: llama.cpp and
+  ggml, nlohmann/json (vendored by llama.cpp), llamafile's sgemm, and YaRN
+  (cited in ggml-cpu). Review this list when the llama.cpp submodule changes.

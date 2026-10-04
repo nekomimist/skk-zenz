@@ -15,6 +15,26 @@ if(NOT EXISTS ${LLAMA_DIR}/CMakeLists.txt)
     "llama.cpp submodule is missing. Run: git submodule update --init --depth 1")
 endif()
 
+# The server version follows the Emacs package version, so that a release tag
+# names both.
+file(STRINGS skk-zenz.el ZENZ_VERSION_LINE REGEX "^;; Version: " LIMIT_COUNT 1)
+string(REGEX MATCH "Version: *([^ ;]+)" ZENZ_VERSION_MATCH "${ZENZ_VERSION_LINE}")
+set(ZENZ_VERSION "${CMAKE_MATCH_1}")
+if(NOT ZENZ_VERSION)
+  message(FATAL_ERROR "No Version header in skk-zenz.el")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS skk-zenz.el)
+
+# A portable build runs on CPUs other than the build machine's and needs only
+# the C library at run time. It is used for release binaries.
+option(ZENZ_PORTABLE "Build a zenz-server that runs on other machines" OFF)
+if(ZENZ_PORTABLE)
+  # Without GGML_NATIVE, ggml enables AVX2, FMA, F16C, and BMI2 on x86_64
+  # (x86-64-v3) and the base instruction set elsewhere.
+  set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+  set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+endif()
+
 # Build only libllama/ggml, statically, CPU only.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
@@ -35,9 +55,13 @@ target_link_libraries(zenz_model PUBLIC llama)
 add_library(zenz_protocol STATIC src/protocol.cpp)
 target_include_directories(zenz_protocol PUBLIC src ${LLAMA_DIR}/vendor)
 target_link_libraries(zenz_protocol PUBLIC zenz_prompt)
+target_compile_definitions(zenz_protocol PRIVATE ZENZ_VERSION="${ZENZ_VERSION}")
 
 add_executable(zenz-server src/main.cpp)
 target_link_libraries(zenz-server PRIVATE zenz_prompt zenz_model zenz_protocol)
+if(ZENZ_PORTABLE)
+  target_link_options(zenz-server PRIVATE -static-libstdc++ -static-libgcc)
+endif()
 
 enable_testing()
 
@@ -59,3 +83,7 @@ add_test(NAME cli_max_context
          COMMAND zenz-server --max-context 3 --left 一二三四五 --prompt あ)
 set_tests_properties(cli_max_context PROPERTIES
                      PASS_REGULAR_EXPRESSION "三四五" FAIL_REGULAR_EXPRESSION "二")
+
+add_test(NAME cli_version COMMAND zenz-server --version)
+set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION
+                     "\"version\":\"${ZENZ_VERSION}\"")
