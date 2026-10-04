@@ -1,0 +1,44 @@
+name: dist
+
+# Builds the release archives. Called by the test workflow (to catch
+# breakage early) and by the release workflow (to publish them).
+on:
+  workflow_call:
+
+jobs:
+  dist:
+    # Ubuntu 22.04 sets the glibc requirement of the binary (2.34).
+    strategy:
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ make binutils
+      - name: Model cache key
+        id: model
+        run: echo "sha256=$(sed -n 's/^MODEL_SHA256 ?= //p' Makefile)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: zenz-model-${{ steps.model.outputs.sha256 }}
+      - run: make model
+      - run: make dist
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          mkdir smoke
+          tar -xzf dist/zenz-server-*.tar.gz -C smoke
+          smoke/zenz-server --version
+          smoke/zenz-server --model models/zenz-v3.2-small-Q5_K_M.gguf \
+            --left 試験問題の --convert かいとう | tee smoke/out
+          grep -qx 解答 smoke/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.runner }}
+          path: dist/

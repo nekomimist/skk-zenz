@@ -221,7 +221,8 @@ prebuilt zenz-server and the model on first use, like nekomimist/neft. Design:
 
 - [x] Portable build (`ZENZ_PORTABLE`), `zenz-server --version`, and
       `make dist` with license notices.
-- [ ] CI: build and test on push; publish release archives on `v*` tags.
+- [x] CI: build and test on push; publish release archives on `v*` tags.
+      ARM64 is built and smoke-tested in CI only.
 - [ ] Client: download the server and the model into the user's Emacs
       directory, verify SHA-256, and pick the executable and model to use.
 - [ ] Docs: install with elpaca and `use-package` `:vc`, release procedure.

@@ -338,7 +338,9 @@ Release binaries let users install skk-zenz as a package (elpaca, or
     on Ubuntu 22.04 (glibc 2.35).
 - x86-64-v3 runs as fast as `-march=native`; an x86-64-v2 build (SSE4.2 only)
   was about three times slower (findings in `ROADMAP.md`). CPUs without AVX2
-  can build from source.
+  can build from source. Scores differ slightly between builds that use
+  different SIMD code (AVX-512 in a native build, for example), which can
+  swap low-ranked candidates.
 - `make dist` writes `dist/zenz-server-vX.Y.Z-linux-ARCH.tar.gz` (ARCH is
   `amd64` or `arm64`) and a `sha256sum`-style `.sha256` file.
   `scripts/dist.sh` refuses binaries that need libraries other than the C
@@ -347,3 +349,12 @@ Release binaries let users install skk-zenz as a package (elpaca, or
   notices cover the MIT-licensed code compiled into zenz-server: llama.cpp and
   ggml, nlohmann/json (vendored by llama.cpp), llamafile's sgemm, and YaRN
   (cited in ggml-cpu). Review this list when the llama.cpp submodule changes.
+- CI (`.github/workflows/`): `test.yml` runs `make test` with the model on
+  Ubuntu 24.04 (Emacs 29) for x86_64 and ARM64, and calls `dist.yml`, which
+  runs `make dist` on Ubuntu 22.04 for both and converts かいとう with the
+  extracted binary. `release.yml` runs `dist.yml` on a `v*` tag and publishes
+  the four files as a GitHub release; it fails if the archive names do not
+  carry the tag, that is, if the tag does not match the Version header.
+- Release procedure: set `;; Version:` in `skk-zenz.el` to `X.Y.Z`, give the
+  unreleased section of `CHANGELOG.md` that version, commit, then push the
+  tag `vX.Y.Z`.
