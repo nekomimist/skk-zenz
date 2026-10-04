@@ -124,8 +124,11 @@ void test_score_chunks(const char* path) {
     std::vector<float> chunked;
     CHECK(small->score(zenz::build_prompt({"きしゃ", "", ""}), texts, &chunked, &error));
     CHECK_EQ(chunked.size(), all.size());
+    // A mix-up of sequences or KV cells changes scores by whole units. ARM's
+    // i8mm kernels multiply rows in pairs, so the batch layout changes the
+    // summation order and moves a score by up to about 0.01.
     for (std::size_t i = 0; i < std::min(chunked.size(), all.size()); ++i) {
-        CHECK(std::fabs(chunked[i] - all[i]) < 1e-3f);
+        CHECK(std::fabs(chunked[i] - all[i]) < 0.05f);
     }
 }
 
