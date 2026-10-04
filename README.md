@@ -26,8 +26,13 @@
 ## インストール
 
 elpaca を使う場合は次のように書きます。
+elpaca は DDSKK の依存パッケージのバージョンを満たしていないと判定して、DDSKK のビルドを止めます。
+そのため、DDSKK はバージョンの検査を外して入れます。
 
 ```elisp
+(use-package ddskk
+  :ensure (:build (:not elpaca-check-version)))
+
 (use-package skk-zenz
   :ensure (:host github :repo "nekomimist/skk-zenz")
   :config

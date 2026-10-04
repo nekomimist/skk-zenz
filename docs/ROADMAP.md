@@ -226,8 +226,17 @@ prebuilt zenz-server and the model on first use, like nekomimist/neft. Design:
 - [x] Client: download the server and the model into the user's Emacs
       directory, verify SHA-256, and pick the executable and model to use.
 - [x] Docs: install with elpaca and `use-package` `:vc`, release procedure.
-- [ ] Release, then install into a clean Emacs 29 with `package-vc-install`
+- [x] Release, then install into a clean Emacs 29 with `package-vc-install`
       and with elpaca.
+
+Install check (2026-10-04, v0.2.0): in a clean Emacs 29.3 (Ubuntu 24.04)
+with `package-vc-install` and with elpaca 0.12, and in a clean Emacs 31.1
+with `use-package` `:vc`, skk-zenz installed with DDSKK from MELPA,
+downloaded the server and the model, and converted かいとう after 試験問題の
+to 解答. `:vc` picked the release commit. elpaca fails DDSKK's own
+dependency version check (MELPA date versions such as cdb 20141201.754
+against the packages' headers), independent of skk-zenz; installing DDSKK
+with `:build (:not elpaca-check-version)` works around it (README).
 
 Findings (2026-10-04, same machine as Phase 0, 4 threads, mean of 30 runs;
 22-kana reading with left context 試験問題の, and a score request of four
