@@ -358,9 +358,12 @@ Release binaries let users install skk-zenz as a package (elpaca, or
   extracted binary. `release.yml` runs `dist.yml` on a `v*` tag and publishes
   the four files as a GitHub release; it fails if the archive names do not
   carry the tag, that is, if the tag does not match the Version header.
-- Release procedure: set `;; Version:` in `skk-zenz.el` to `X.Y.Z`, give the
-  unreleased section of `CHANGELOG.md` that version, commit, then push the
-  tag `vX.Y.Z`.
+- Release procedure: set `;; Version:` in `skk-zenz.el` and
+  `skk-zenz-version` to `X.Y.Z`, give the unreleased section of
+  `CHANGELOG.md` that version, commit, then push the tag `vX.Y.Z` on that
+  commit. The release commit must change the Version line: `use-package`
+  `:vc` (Emacs 30 and later) installs the last commit that changed it
+  (`package-vc`'s `:last-release`), so that commit must be the tagged one.
 
 ### Installation (client)
 - `skk-zenz-server-program` and `skk-zenz-model-file` default to nil, which
