@@ -97,7 +97,7 @@ time, in order.
 
 After the model loads, the server writes a hello line:
 ```json
-{"hello": "zenz-server", "protocol": 2, "version": "0.1.0"}
+{"hello": "zenz-server", "protocol": 2, "version": "0.2.0"}
 ```
 The client must check `protocol` against its own version. `version` is the
 server's build version (see Release Binaries) and is informational only.

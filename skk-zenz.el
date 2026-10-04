@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Hiroyuki Ishikura
 
 ;; Author: Hiroyuki Ishikura
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1") (ddskk "17.1"))
 ;; Keywords: i18n, input method, japanese
 ;; SPDX-License-Identifier: MIT
@@ -56,7 +56,7 @@
 (defconst skk-zenz-protocol-version 2
   "Protocol version this client speaks.  Must match `zenz-server'.")
 
-(defconst skk-zenz-version "0.1.0"
+(defconst skk-zenz-version "0.2.0"
   "Version of skk-zenz.  Must match the Version header.
 It also names the `zenz-server' release that `skk-zenz-install'
 downloads.")
