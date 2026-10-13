@@ -241,6 +241,42 @@ is in `ROADMAP.md` (Phase 6).
 - Learning is unchanged: reranked words come from dictionaries and are
   learned as usual.
 
+#### Learning from choices against reranking
+A word zenz finds unlikely (a name, a preferred variant such as 稼動) would
+otherwise sink below zenz's favorite on every conversion: SKK puts the
+confirmed word back at the head of the personal dictionary, and reranking
+pushes it down again. `skk-zenz-rerank-learn` (default t) corrects this with
+one score offset per reading. The rules are kept few on purpose, so that the
+user can predict the result.
+
+- The rerank records, buffer-locally, the reading, the text of the first
+  candidate after reranking, and the raw zenz scores (before any boost).
+  The `skk-henkan` advice that clears the usage data clears it at the start
+  of a conversion; it is used once.
+- A `:before` advice on `skk-kakutei` compares the confirmed word with the
+  record (`skk-zenz--learn-choice`):
+  - The first candidate was confirmed: nothing changes.
+  - Another candidate that zenz scored below its best: the reading's boost
+    becomes (that word, best raw score − its raw score), replacing any
+    other word.
+  - Another candidate that scored best, or that was not scored (a Lisp
+    form, a zenz candidate, a newly registered word): the boost is
+    forgotten.
+- Reranking adds the gap to the boosted word's score. In the context where
+  it was learned, the word then ties zenz's best and keeps its place
+  (`promote` needs a margin above the threshold; in `mix` the word is at
+  the head of the personal dictionary and has the smaller rank penalty).
+  A context that favors another word by more still overturns it.
+- Gaps use raw scores, so a boost never feeds into the next gap. A new gap
+  is only stored when the boosted word lost anyway, so it can only grow,
+  and it is bounded by gaps actually observed. Confirming another word
+  when the boosted one was first is the way back.
+- Boosts are a hash table keyed by `skk-henkan-key` (かk for okuri-ari) with
+  values (TEXT . GAP), TEXT being the candidate without annotation or
+  okurigana. They are read from `skk-zenz-rerank-learn-file` on first use
+  and written back on every change (changes are rare), as a `lisp-data`
+  list of (READING TEXT . GAP). nil keeps them in memory only.
+
 ### Learning
 - Words confirmed from candidates for long readings (trigger a) are not
   learned. These are usually whole phrases that would clutter the personal
@@ -278,8 +314,8 @@ sent anywhere. `scripts/usage_report.py` summarizes it.
   candidates after filtering, and the confirmed word's rank among them
   (null if absent).
 - If reranking scored the candidates, `rerank` holds the status, the time,
-  the number of candidates, the first five after reranking, and the
-  confirmed word's rank before and after.
+  the number of candidates, the first five after reranking, the confirmed
+  word's rank before and after, and the boosted word (null if none).
 - The context is not recorded; readings and words are.
 - Data is collected per conversion in a buffer-local variable. A `:before`
   advice on `skk-henkan` clears it when `skk-henkan-list` is empty (a new

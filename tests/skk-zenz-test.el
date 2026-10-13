@@ -38,6 +38,9 @@
          (skk-zenz-timeout 3.0)
          (skk-zenz-startup-timeout 10.0)
          (skk-zenz-retry-interval 30)
+         ;; Learned boosts stay in memory, apart from the user's file.
+         (skk-zenz-rerank-learn-file nil)
+         (skk-zenz--boosts (make-hash-table :test #'equal))
          (skk-search-prog-list (list skk-zenz--long-form
                                      '(skk-search-jisyo-file skk-jisyo 0 t)
                                      skk-zenz--fallback-form))
@@ -381,6 +384,118 @@ DDSKK leaves the buffer; point is left after OKURIGANA."
         (let ((skk-okuri-char "k"))
           (should (equal (skk-zenz-rerank-search `(',words)) words)))))))
 
+(ert-deftest skk-zenz-test-rerank-learn ()
+  (skk-zenz-test--with-server nil
+    (skk-zenz-test--with-henkan "▼かな" "かな"
+      (let ((skk-zenz-rerank-method 'promote)
+            (skk-zenz-rerank-threshold 1.0)
+            (skk-zenz-rerank-timeout 3.0)
+            (skk-zenz-rerank-learn t)
+            (rerank (lambda (&rest words) (skk-zenz-rerank-search `(',words)))))
+        ;; 乙5 is promoted; raw scores are recorded for the choice.
+        (should (equal (funcall rerank "甲1;注釈" "乙5" "丙3") '("乙5" "甲1;注釈" "丙3")))
+        (should (equal skk-zenz--last-rerank
+                       '("かな" "乙5" (("甲1" . 1.0) ("乙5" . 5.0) ("丙3" . 3.0)))))
+        ;; Confirming 甲1 against the rerank stores the gap to the best.
+        (skk-zenz--learn-choice "かな" "甲1")
+        (should (equal (gethash "かな" skk-zenz--boosts) '("甲1" . 4.0)))
+        ;; With the gap added, 甲1 ties 乙5 and keeps its place.
+        (should (equal (funcall rerank "甲1;注釈" "乙5" "丙3") '("甲1;注釈" "乙5" "丙3")))
+        (should (equal (cadr skk-zenz--last-rerank) "甲1"))
+        ;; Confirming the first candidate changes nothing.
+        (skk-zenz--learn-choice "かな" "甲1")
+        (should (equal (gethash "かな" skk-zenz--boosts) '("甲1" . 4.0)))
+        ;; A context that favors 乙 more still overturns it.
+        (should (equal (funcall rerank "甲1" "乙9") '("乙9" "甲1")))
+        (skk-zenz--learn-choice "かな" "乙9")
+        (should (equal (gethash "かな" skk-zenz--boosts) '("甲1" . 4.0)))
+        ;; Overriding again stores the new, larger raw gap.
+        (skk-zenz--learn-choice "かな" "甲1")
+        (should (equal (gethash "かな" skk-zenz--boosts) '("甲1" . 8.0)))
+        ;; Another candidate replaces it, and only one word is kept.
+        (should (equal (funcall rerank "甲1" "乙5" "丙3") '("甲1" "乙5" "丙3")))
+        (skk-zenz--learn-choice "かな" "丙3")
+        (should (equal (gethash "かな" skk-zenz--boosts) '("丙3" . 2.0)))
+        ;; zenz's best or an unscored word forgets the boost.
+        (puthash "かな" '("甲1" . 9.0) skk-zenz--boosts)
+        (should (equal (funcall rerank "甲1" "乙5" "丙3") '("甲1" "乙5" "丙3")))
+        (skk-zenz--learn-choice "かな" "乙5")
+        (should-not (gethash "かな" skk-zenz--boosts))
+        (puthash "かな" '("甲1" . 9.0) skk-zenz--boosts)
+        (funcall rerank "甲1" "乙5" "(lisp)")
+        (skk-zenz--learn-choice "かな" "新語")
+        (should-not (gethash "かな" skk-zenz--boosts))
+        ;; Another reading is not compared with this rerank.
+        (funcall rerank "甲1" "乙5")
+        (skk-zenz--learn-choice "べつ" "甲1")
+        (should-not (gethash "べつ" skk-zenz--boosts))
+        ;; Disabled learning ignores stored boosts.
+        (puthash "かな" '("甲1" . 9.0) skk-zenz--boosts)
+        (let ((skk-zenz-rerank-learn nil))
+          (should (equal (funcall rerank "甲1" "乙5") '("乙5" "甲1"))))))))
+
+(ert-deftest skk-zenz-test-rerank-learn-okuri-ari ()
+  (skk-zenz-test--with-server nil
+    (skk-zenz-test--with-okuri-henkan "左▼かく右" "かk" "く"
+      (let ((skk-zenz-rerank-method 'promote)
+            (skk-zenz-rerank-timeout 3.0))
+        ;; Boosts are kept by stem, like dictionary candidates.
+        (should (equal (skk-zenz-rerank-search '('("描1" "書9"))) '("書9" "描1")))
+        (skk-zenz--learn-choice "かk" "描1")
+        (should (equal (gethash "かk" skk-zenz--boosts) '("描1" . 8.0)))
+        (should (equal (skk-zenz-rerank-search '('("描1" "書9"))) '("描1" "書9")))))))
+
+(ert-deftest skk-zenz-test-rerank-learn-file ()
+  (let* ((file (make-temp-file "skk-zenz-rerank" nil ".eld"))
+         (skk-zenz-rerank-learn-file file)
+         (skk-zenz--boosts nil)
+         (inhibit-message t))
+    (unwind-protect
+        (progn
+          ;; An empty file gives an empty table.
+          (should (hash-table-p (skk-zenz--boosts)))
+          (should (zerop (hash-table-count skk-zenz--boosts)))
+          (puthash "かな" '("仮名" . 2.5) skk-zenz--boosts)
+          (puthash "あい" '("藍" . 1.0) skk-zenz--boosts)
+          (skk-zenz--save-boosts)
+          (setq skk-zenz--boosts nil)
+          (should (equal (gethash "かな" (skk-zenz--boosts)) '("仮名" . 2.5)))
+          (should (equal (gethash "あい" (skk-zenz--boosts)) '("藍" . 1.0)))
+          ;; Malformed entries are skipped, and a broken file is reported.
+          (with-temp-file file
+            (insert "((\"かな\" \"仮名\" . 1.5) (\"あい\" 1 . 2) junk)"))
+          (setq skk-zenz--boosts nil)
+          (should (equal (hash-table-count (skk-zenz--boosts)) 1))
+          (with-temp-file file (insert "(("))
+          (setq skk-zenz--boosts nil)
+          (should (zerop (hash-table-count (skk-zenz--boosts)))))
+      (delete-file file))))
+
+(ert-deftest skk-zenz-test-record-choice ()
+  (with-temp-buffer
+    (let ((skk-zenz-rerank-learn t)
+          (skk-zenz-rerank-learn-file nil)
+          (skk-zenz--boosts (make-hash-table :test #'equal))
+          (skk-henkan-key "かな")
+          (skk-henkan-mode 'active))
+      ;; The annotation is removed before comparing.
+      (setq skk-zenz--last-rerank '("かな" "乙5" (("甲1" . 1.0) ("乙5" . 5.0))))
+      (skk-zenz--record-choice nil "甲1;注釈")
+      (should (equal (gethash "かな" skk-zenz--boosts) '("甲1" . 4.0)))
+      ;; The rerank is used once.
+      (should-not skk-zenz--last-rerank)
+      ;; Outside ▼ mode, nothing is learned.
+      (clrhash skk-zenz--boosts)
+      (setq skk-zenz--last-rerank '("かな" "乙5" (("甲1" . 1.0) ("乙5" . 5.0))))
+      (let ((skk-henkan-mode 'on))
+        (skk-zenz--record-choice nil "甲1"))
+      (should (zerop (hash-table-count skk-zenz--boosts)))
+      ;; A new conversion forgets the last rerank.
+      (let ((skk-henkan-list nil)
+            (skk-zenz--usage nil))
+        (skk-zenz--reset-usage))
+      (should-not skk-zenz--last-rerank))))
+
 ;;; Learning exclusion
 
 (ert-deftest skk-zenz-test-learning ()
@@ -679,6 +794,7 @@ model's SHA-256 is bound to match."
           (should (memq #'skk-zenz--exclude-word-p
                         skk-search-excluding-word-pattern-function))
           (should (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))
+          (should (advice-member-p #'skk-zenz--record-choice 'skk-kakutei))
           (should (memq #'skk-zenz--check-install skk-mode-hook))
           ;; Enabling twice does not add duplicates.
           (skk-zenz-mode 1)
@@ -688,6 +804,7 @@ model's SHA-256 is bound to match."
     (should-not (memq #'skk-zenz--exclude-word-p
                       skk-search-excluding-word-pattern-function))
     (should-not (advice-member-p #'skk-zenz--strip-annotation 'skk-update-jisyo))
+    (should-not (advice-member-p #'skk-zenz--record-choice 'skk-kakutei))
     (should-not (memq #'skk-zenz--check-install skk-mode-hook))))
 
 (ert-deftest skk-zenz-test-mode-wraps-dictionaries ()
@@ -734,7 +851,8 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
           (insert prefix)
           (skk-mode 1)
           (execute-kbd-macro (kbd keys))
-          (let ((henkan-list skk-henkan-list))
+          ;; DDSKK's learning may modify the list in place.
+          (let ((henkan-list (copy-sequence skk-henkan-list)))
             (skk-kakutei)
             (list (buffer-string) henkan-list)))
       (kill-buffer buffer))))
@@ -812,6 +930,7 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
             (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
             (advice-add 'skk-henkan :before #'skk-zenz--reset-usage)
             (advice-add 'skk-kakutei :before #'skk-zenz--log-confirmation)
+            (advice-add 'skk-kakutei :before #'skk-zenz--record-choice)
             ;; Dictionary hit: zenz is not consulted.
             (should (equal (skk-zenz-test--type "" "K i s h a SPC")
                            '("汽車" ("汽車"))))
@@ -839,15 +958,22 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                              '("解答9" ("解答9" "回答1"))))
               ;; Okuri-ari: the stem 書9 is promoted, the okurigana kept.
               (should (equal (skk-zenz-test--type "" "K a K u")
-                             '("書9く" ("書9" "描1")))))
+                             '("書9く" ("書9" "描1"))))
+              ;; Confirming 回答1 against zenz keeps it first next time,
+              ;; although SKK's learning alone would see 解答9 promoted.
+              (should (equal (skk-zenz-test--type "" "K a i t o u SPC SPC")
+                             '("回答1" ("解答9" "回答1"))))
+              (should (equal (gethash "かいとう" skk-zenz--boosts) '("回答1" . 8.0)))
+              (should (equal (skk-zenz-test--type "" "K a i t o u SPC")
+                             '("回答1" ("回答1" "解答9")))))
             (let ((jisyo (with-current-buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)
                            (buffer-string))))
               (should (string-match-p "^きしゃ /きしゃ-1/汽車/$" jisyo))
-              (should (string-match-p "^かいとう /解答9/$" jisyo))
+              (should (string-match-p "^かいとう /回答1/解答9/$" jisyo))
               (should (string-match-p "^ぶんみゃく /左|/$" jisyo))
               (should-not (string-match-p "zenz\\|てんき" jisyo)))
             ;; One usage record per confirmation.
-            (pcase-let ((`(,kisha ,kisha-zenz ,bunmyaku ,long ,kaitou ,kaku)
+            (pcase-let ((`(,kisha ,kisha-zenz ,bunmyaku ,long ,kaitou ,kaku ,_ ,boosted)
                          (skk-zenz-test--read-log skk-zenz-log-file)))
               (should (equal (skk-zenz-test--fields kisha '(key word index source))
                              '("きしゃ" "汽車" 0 "dictionary")))
@@ -869,10 +995,15 @@ Return (BUFFER-TEXT HENKAN-LIST) with the list as it was before confirming."
                              '("かk" "く" "書9")))
               (should (equal (skk-zenz-test--fields (alist-get 'rerank kaku)
                                                     '(rank-before rank-after))
-                             '(1 0))))))
+                             '(1 0)))
+              (should-not (alist-get 'boost (alist-get 'rerank kaitou)))
+              (should (equal (skk-zenz-test--fields (alist-get 'rerank boosted)
+                                                    '(boost rank-before rank-after))
+                             '("回答1" 0 0))))))
       (advice-remove 'skk-update-jisyo #'skk-zenz--strip-annotation)
       (advice-remove 'skk-henkan #'skk-zenz--reset-usage)
       (advice-remove 'skk-kakutei #'skk-zenz--log-confirmation)
+      (advice-remove 'skk-kakutei #'skk-zenz--record-choice)
       (when-let* ((buffer (skk-get-jisyo-buffer skk-jisyo 'nomsg)))
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))

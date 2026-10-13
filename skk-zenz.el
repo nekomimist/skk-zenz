@@ -201,6 +201,20 @@ Later candidates keep their positions."
   "Seconds to wait for scores before keeping dictionary order."
   :type 'number)
 
+(defcustom skk-zenz-rerank-learn t
+  "If non-nil, reranking learns from words confirmed against it.
+When the confirmed word is not the first candidate after reranking and
+zenz scored it below its best candidate, the difference is stored for
+the reading, and later reranks of the reading add it to the word's score.
+Each reading keeps one such word.  Confirming another candidate that was
+not first replaces or forgets it.  See `skk-zenz-rerank-learn-file'."
+  :type 'boolean)
+
+(defcustom skk-zenz-rerank-learn-file (locate-user-emacs-file "skk-zenz-rerank.eld")
+  "File that keeps what `skk-zenz-rerank-learn' learned, or nil.
+If nil, learned words are forgotten when Emacs exits."
+  :type '(choice (const :tag "Do not save" nil) file))
+
 (defcustom skk-zenz-timeout 1.0
   "Seconds to wait for a conversion before giving up."
   :type 'number)
@@ -250,6 +264,16 @@ Used when `skk-zenz-context-skip-non-japanese' is non-nil.")
 (defvar-local skk-zenz--candidates nil
   "Candidates zenz returned for the last reading, as (READING TRIGGER WORDS).
 Used to decide whether a confirmed word is learned.")
+
+(defvar-local skk-zenz--last-rerank nil
+  "The last scored rerank in the conversion, as (READING TOP SCORES).
+TOP is the text of the first candidate after reranking, and SCORES an
+alist of (TEXT . SCORE) with zenz scores before any boost.  Used by
+`skk-zenz-rerank-learn'.")
+
+(defvar skk-zenz--boosts nil
+  "Learned boosts as a hash table from reading to (TEXT . GAP), or nil.
+nil until `skk-zenz-rerank-learn-file' has been read.")
 
 (defvar skk-zenz--last-call nil
   "Outcome of the last request, as (:status STATUS :ms MS).
@@ -961,7 +985,6 @@ Return WORDS unchanged if KEY is not eligible or scoring fails."
         ;; different annotations.
         (dolist (word (seq-take words skk-zenz-rerank-limit))
           (when-let* ((text (skk-zenz--scorable-text word)))
-            (setq text (concat text okurigana))
             (unless (member text texts)
               (push text texts))
             (push (cons word text) pairs)))
@@ -971,19 +994,29 @@ Return WORDS unchanged if KEY is not eligible or scoring fails."
                             ;; the buffer and is part of the scored text.
                             (skk-zenz--score (car reading) (skk-zenz--left-context)
                                              (skk-zenz--right-context (length okurigana))
-                                             texts)))
+                                             (mapcar (lambda (text) (concat text okurigana))
+                                                     texts))))
+               (by-text (cl-mapcar #'cons texts scores))
+               (boost (and scores skk-zenz-rerank-learn
+                           (gethash key (skk-zenz--boosts))))
                (result (if (null scores)
                            words
-                         (let ((by-text (cl-mapcar #'cons texts scores)))
-                           (skk-zenz--rerank-words
-                            words
-                            (mapcar (lambda (pair)
-                                      (cons (car pair) (cdr (assoc (cdr pair) by-text))))
-                                    pairs))))))
+                         (skk-zenz--rerank-words
+                          words
+                          (mapcar (lambda (pair)
+                                    (let ((score (cdr (assoc (cdr pair) by-text))))
+                                      (cons (car pair)
+                                            (if (equal (cdr pair) (car boost))
+                                                (+ score (cdr boost))
+                                              score))))
+                                  pairs)))))
+          (setq skk-zenz--last-rerank
+                (and scores (list key (skk-zenz--word-text (car result)) by-text)))
           (when (cdr texts)
             (skk-zenz--note key :rerank
                             `(:before ,(mapcar #'skk-zenz--word-text words)
                               :after ,(mapcar #'skk-zenz--word-text result)
+                              :boost ,(car boost)
                               ,@skk-zenz--last-call)))
           (unless (equal result words)
             (skk-zenz--log "reranked %s: %S" key (seq-take result 5)))
@@ -1069,6 +1102,81 @@ personal dictionary."
         (cons (car (skk-treat-strip-note-from-word word)) (cdr args))
       args)))
 
+;;; Rerank learning
+
+(defun skk-zenz--boosts ()
+  "Return the table of learned boosts.
+The first call reads `skk-zenz-rerank-learn-file'."
+  (or skk-zenz--boosts
+      (let ((table (make-hash-table :test #'equal))
+            (file skk-zenz-rerank-learn-file))
+        (when (and file (file-readable-p file))
+          (condition-case err
+              (with-temp-buffer
+                (let ((coding-system-for-read 'utf-8))
+                  (insert-file-contents file))
+                (dolist (entry (read (current-buffer)))
+                  (pcase entry
+                    (`(,key ,text . ,gap)
+                     (when (and (stringp key) (stringp text) (numberp gap))
+                       (puthash key (cons text gap) table))))))
+            (error
+             (message "skk-zenz: cannot read %s: %s" file (error-message-string err)))))
+        (setq skk-zenz--boosts table))))
+
+(defun skk-zenz--save-boosts ()
+  "Write the learned boosts to `skk-zenz-rerank-learn-file'."
+  (when-let* ((file skk-zenz-rerank-learn-file))
+    (condition-case err
+        (let ((entries nil))
+          (maphash (lambda (key boost) (push (cons key boost) entries))
+                   (skk-zenz--boosts))
+          (make-directory (file-name-directory (expand-file-name file)) t)
+          (let ((coding-system-for-write 'utf-8-unix)
+                (print-length nil)
+                (print-level nil))
+            (with-temp-file file
+              (insert ";; Rerank boosts learned by skk-zenz.  -*- lisp-data -*-\n"
+                      ";; (READING TEXT . GAP)\n")
+              (pp (sort entries (lambda (a b) (string< (car a) (car b))))
+                  (current-buffer)))))
+      (error
+       (message "skk-zenz: cannot write %s: %s" file (error-message-string err))))))
+
+(defun skk-zenz--learn-choice (key text)
+  "Learn from confirming TEXT for reading KEY after the last rerank.
+Confirming the first candidate changes nothing.  Confirming another one
+stores the gap between zenz's best score and TEXT's, or forgets KEY's
+boost if TEXT scored best or was not scored.  Scores are taken before
+any boost, so a boost never feeds into the next gap."
+  (pcase-let ((`(,reading ,top ,scores) skk-zenz--last-rerank))
+    (when (and (equal reading key) (not (equal text top)))
+      (let* ((best (apply #'max (mapcar #'cdr scores)))
+             (score (cdr (assoc text scores)))
+             (new (and score (> score -1.0e+INF) (< score best)
+                       (cons text (- best score))))
+             (table (skk-zenz--boosts)))
+        (unless (equal new (gethash key table))
+          (if new
+              (puthash key new table)
+            (remhash key table))
+          (skk-zenz--log "rerank boost for %s: %S" key new)
+          (skk-zenz--save-boosts))))))
+
+(defun skk-zenz--record-choice (&optional _arg word)
+  "Learn from the confirmed word for `skk-zenz-rerank-learn'.
+WORD is the word being confirmed, or nil for the current candidate.  Used
+as `:before' advice on `skk-kakutei'."
+  (when (and skk-zenz--last-rerank (eq skk-henkan-mode 'active))
+    (when skk-zenz-rerank-learn
+      (condition-case err
+          (let ((word (or word (skk-get-current-candidate 'noconv))))
+            (when (stringp word)
+              (skk-zenz--learn-choice skk-henkan-key (skk-zenz--word-text word))))
+        (error
+         (message "skk-zenz: cannot learn from the choice: %s" (error-message-string err)))))
+    (setq skk-zenz--last-rerank nil)))
+
 ;;; Usage log
 
 (defun skk-zenz--word-text (word)
@@ -1084,10 +1192,11 @@ Do nothing unless `skk-zenz-log-file' is non-nil."
     (setcdr skk-zenz--usage (plist-put (cdr skk-zenz--usage) property value))))
 
 (defun skk-zenz--reset-usage (&rest _)
-  "Forget the usage data when a new conversion starts.
+  "Forget the usage data and the last rerank when a new conversion starts.
 Used as `:before' advice on `skk-henkan'."
   (unless skk-henkan-list
-    (setq skk-zenz--usage nil)))
+    (setq skk-zenz--usage nil
+          skk-zenz--last-rerank nil)))
 
 (defun skk-zenz--note-registration (word)
   "Record WORD registered in the minibuffer and return it.
@@ -1132,7 +1241,8 @@ Used as `:filter-return' advice on `skk-henkan-in-minibuff'."
                             (count . ,(length before))
                             (top . ,(vconcat (seq-take after 5)))
                             (rank-before . ,(skk-zenz--rank text before))
-                            (rank-after . ,(skk-zenz--rank text after))))))))))
+                            (rank-after . ,(skk-zenz--rank text after))
+                            (boost . ,(or (plist-get rerank :boost) :null))))))))))
 
 (defun skk-zenz--log-confirmation (&optional _arg word)
   "Append a usage record to `skk-zenz-log-file' for the confirmed word.
@@ -1174,7 +1284,8 @@ by zenz."
         (advice-add 'skk-update-jisyo :filter-args #'skk-zenz--strip-annotation)
         (advice-add 'skk-henkan :before #'skk-zenz--reset-usage)
         (advice-add 'skk-henkan-in-minibuff :filter-return #'skk-zenz--note-registration)
-        (advice-add 'skk-kakutei :before #'skk-zenz--log-confirmation))
+        (advice-add 'skk-kakutei :before #'skk-zenz--log-confirmation)
+        (advice-add 'skk-kakutei :before #'skk-zenz--record-choice))
     (setq skk-search-prog-list
           (skk-zenz--unwrap-dictionaries
            (seq-remove (lambda (form)
@@ -1187,6 +1298,7 @@ by zenz."
     (advice-remove 'skk-henkan #'skk-zenz--reset-usage)
     (advice-remove 'skk-henkan-in-minibuff #'skk-zenz--note-registration)
     (advice-remove 'skk-kakutei #'skk-zenz--log-confirmation)
+    (advice-remove 'skk-kakutei #'skk-zenz--record-choice)
     (skk-zenz-stop)))
 
 (provide 'skk-zenz)

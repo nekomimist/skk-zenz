@@ -248,6 +248,58 @@ texts for かいとう):
 | `GGML_NATIVE=OFF` (x86-64-v3) | 53 ms | 132 ms | 23 ms |
 | x86-64-v2 (SSE4.2 only) | 152 ms | 412 ms | 75 ms |
 
+## Phase 8: Learn from choices against reranking
+A word the user keeps in the personal dictionary but zenz finds unlikely
+(a name, a preferred variant such as 稼動) sinks below zenz's favorite every
+time, and SKK's own learning cannot lift it: the confirmed word returns to
+the head of the dictionary, and reranking pushes it down again. A stronger
+dictionary prior would stop zenz from overturning it in other contexts, and
+complex rules would surprise the user. Design: `ARCHITECTURE.md` (Reranking
+dictionary candidates).
+
+- Keep at most one (word, gap) per reading. Reranking adds the gap to that
+  word's score.
+- On confirmation after a rerank: confirming the first candidate changes
+  nothing. Confirming another candidate stores (that word, best raw score −
+  its raw score) if zenz scored it below its best candidate, and forgets the
+  reading's entry otherwise.
+- Gaps use raw scores, so a boost never feeds into the next gap. Each
+  override stores the current gap, which can only be larger than the old one
+  (the boosted word lost by more than the threshold).
+
+- [x] Client: boosts, learning on confirmation, persistence.
+- [x] Evaluation with words zenz does not know (`scripts/eval_rerank_learn.py`).
+
+Findings (2026-10-13, `scripts/eval_rerank_learn.json`: 11 readings whose
+personal-dictionary word zenz finds unlikely, 63 hand-written uses of which
+10 want a rival word; personal dictionary starting with the user's word,
+then SKK-JISYO.L; SKK's learning simulated):
+
+| Method | User's word top-1 | Extra SPC | Rival top-1 | Extra SPC |
+|---|---|---|---|---|
+| Dictionary order | 44/53 | 9 | 0/10 | 15 |
+| promote θ=1 | 13/53 | 41 | 10/10 | 0 |
+| promote θ=1 + learn | 34/53 | 19 | 9/10 | 1 |
+| mix β=1 | 13/53 | 108 | 10/10 | 0 |
+| mix β=1 + learn | 34/53 | 40 | 9/10 | 1 |
+
+- Preferred variants (稼動, 申込, 取扱, 奇麗) sink once and then stay first.
+  凡て (9 to 10 below 全て) sinks twice: the second context needed a larger
+  gap.
+- Names zenz does not know (結希, 颯真, 遥花) need very different gaps per
+  context (結希: 4.6 to 9.2 below the best), so they still sink in some
+  contexts. For 結希, the gap learned in one context (9.2) also lifted it
+  above 勇気 in a rival context (8.9); confirming 勇気 there forgot the
+  boost, as designed. zenz cannot separate such contexts.
+- Words close to zenz's best (齋藤, 0.4 below) never sink, and rare words that
+  zenz knows in context (代替, 逃避) are unaffected.
+- Without left context, reranking alone gets 5/53. Learning brings it back
+  toward dictionary order (34/53 against 44/53, rivals 0/10 for both): each
+  word sinks once or twice before its gap is learned.
+- θ=2 gives 36/53 with learning and the same rival result.
+- Caveats: the uses are hand-written and few, and each case starts with the
+  user's word already in the personal dictionary.
+
 ## Later
 - Linux ARM64 support.
 - Okuri-ari conversion by zenz (candidates beyond the dictionary).

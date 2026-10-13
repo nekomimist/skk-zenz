@@ -7,7 +7,8 @@ Sections:
   sources    where confirmed words came from, by reading length
   zenz       per trigger: status, latency, and the rank of the confirmed
              word among the zenz candidates
-  rerank     how often reranking kept, fixed, or broke the first candidate
+  rerank     how often reranking kept, fixed, or broke the first candidate,
+             and how often a learned boost applied
 --examples lists confirmations where zenz was asked but its first candidate
 was not the confirmed word.
 """
@@ -101,11 +102,12 @@ def report_rerank(records):
             c["broken"] += 1
         else:
             c["other"] += 1
+    boosted = sum(1 for x in ok if x.get("boost"))
     table("rerank", ["n", "ok", "timeout", "failed", "ms", "p95", "max",
-                     "kept", "fixed", "broken", "other", "not in list"],
+                     "kept", "fixed", "broken", "other", "not in list", "boosted"],
           [[len(g), status["ok"], status["timeout"], status["error"] + status["unavailable"],
             f"{sum(ms) / len(ms):.0f}" if ms else "-", percentile(ms, 0.95), max(ms, default=0),
-            c["kept"], c["fixed"], c["broken"], c["other"], c["not in list"]]])
+            c["kept"], c["fixed"], c["broken"], c["other"], c["not in list"], boosted]])
 
 
 def show_examples(records):
